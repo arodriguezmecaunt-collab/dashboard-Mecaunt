@@ -3793,7 +3793,7 @@ function renderModalEditFactura(c, emisores) {
   const D = state.data;
 
   const f1 = makeFormField('Mes','month',fac.mes||'','');
-  const f2 = makeFormField('Cliente','text',fac.cliente||','Nombre');
+  const f2 = makeFormField('Cliente','text',fac.cliente||'','Nombre');
   const f3 = makeFormField('Concepto','text',fac.concepto||'','');
   const f4 = makeFormField('Monto (sin IVA)','number',fac.monto||0,'0');
   const f5 = makeFormField('Ajuste %','number',fac.ajuste||0,'0');
