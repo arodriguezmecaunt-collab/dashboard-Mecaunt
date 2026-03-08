@@ -3564,13 +3564,17 @@ function renderFacturacion(c) {
       .then(r=>r.text()).then(t=>{
         try {
           const d = JSON.parse(t);
+          if(d.error) { state.facturacionCargada = 'error'; state.facturacionError = d.error; render(); return; }
           if(d.facturas) state.data.facturas = d.facturas;
           if(d.honorarios) state.data.honorarios = d.honorarios;
           if(d.honorariosConfig) state.data.honorariosConfig = d.honorariosConfig;
           state.facturacionCargada = 'done';
-        } catch(e) { state.facturacionCargada = 'error'; }
+        } catch(e) {
+          state.facturacionCargada = 'error';
+          state.facturacionError = 'Respuesta inválida: '+t.slice(0,200);
+        }
         render();
-      }).catch(()=>{ state.facturacionCargada = 'error'; render(); });
+      }).catch(err=>{ state.facturacionCargada = 'error'; state.facturacionError = err.message; render(); });
   }
 
   const EMISORES = ['Estudio Mecaunt','Tuverta','Barberousse','Alberto Rodriguez','Joaquin Rodriguez'];
@@ -3605,7 +3609,11 @@ function renderFacturacion(c) {
     return;
   }
   if(state.facturacionCargada==='error') {
-    c.append(el('div',{style:{textAlign:'center',padding:'40px',color:'#DC2626',fontSize:'14px'}},'❌ Error al cargar. Recargá la página.'));
+    c.append(el('div',{style:{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:'14px',padding:'24px',marginTop:'8px'}},
+      el('p',{style:{color:'#DC2626',fontWeight:700,marginBottom:'8px'}},'❌ Error al cargar facturación'),
+      el('p',{style:{color:'#7F1D1D',fontSize:'12px',fontFamily:"'DM Mono',monospace",wordBreak:'break-all'}},state.facturacionError||'Error desconocido'),
+      el('button',{className:'btn btn-secondary',style:{marginTop:'12px'},onClick:()=>{state.facturacionCargada=undefined;render();}},'🔄 Reintentar')
+    ));
     return;
   }
 
