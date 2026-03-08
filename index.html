@@ -3559,14 +3559,34 @@ function renderFacturacion(c) {
 }
 
 function renderFacturasTab(c, D, emisores, mesActual) {
-  // Filters
-  if(!state.facFiltros) state.facFiltros = {mes: mesActual, emisor:'todos', estado:'todos'};
+  // Filters — arranca mostrando TODO (año y mes = 'todos')
+  if(!state.facFiltros) state.facFiltros = {anio:'todos', mes:'todos', emisor:'todos', estado:'todos'};
   const f = state.facFiltros;
 
+  // Años disponibles en los datos
+  const aniosSet = new Set((D.facturas||[]).map(fac=>(fac.mes||'').slice(0,4)).filter(Boolean));
+  aniosSet.add(new Date().getFullYear().toString());
+  const anios = Array.from(aniosSet).sort().reverse();
+
   const filRow = el('div',{style:{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'16px',alignItems:'center'}});
-  
-  const mesInp = el('input',{type:'month',value:f.mes||mesActual,className:'filter-select'});
-  mesInp.addEventListener('change',e=>{f.mes=e.target.value;render();});
+
+  // Selector AÑO
+  const anioSel = el('select',{className:'filter-select'});
+  anioSel.append(el('option',{value:'todos'},'Todos los años'));
+  anios.forEach(a=>{const o=el('option',{value:a},a);if(f.anio===a)o.selected=true;anioSel.append(o);});
+  anioSel.addEventListener('change',e=>{f.anio=e.target.value;f.mes='todos';render();});
+
+  // Selector MES
+  const mesSel = el('select',{className:'filter-select'});
+  mesSel.append(el('option',{value:'todos'},'Todos los meses'));
+  const mesesNombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  mesesNombres.forEach((mn,i)=>{
+    const v = String(i+1).padStart(2,'0');
+    const o=el('option',{value:v},mn);
+    if(f.mes===v)o.selected=true;
+    mesSel.append(o);
+  });
+  mesSel.addEventListener('change',e=>{f.mes=e.target.value;render();});
 
   const emisorSel = el('select',{className:'filter-select'});
   emisorSel.append(el('option',{value:'todos'},'Todos los emisores'));
@@ -3579,20 +3599,29 @@ function renderFacturasTab(c, D, emisores, mesActual) {
   });
   estadoSel.addEventListener('change',e=>{f.estado=e.target.value;render();});
 
-  filRow.append(mesInp, emisorSel, estadoSel);
+  // Botón limpiar filtros
+  const btnClear = el('button',{
+    style:{padding:'6px 12px',borderRadius:'8px',fontSize:'12px',cursor:'pointer',background:'#F1F5F9',border:'1px solid #CBD5E1',color:'#475569',fontWeight:600},
+    onClick:()=>{state.facFiltros={anio:'todos',mes:'todos',emisor:'todos',estado:'todos'};render();}
+  },'🔄 Ver todo');
+
+  filRow.append(anioSel, mesSel, emisorSel, estadoSel, btnClear);
   c.append(filRow);
 
-  // Filter facturas
+  // Filter facturas — moneda con trim para evitar espacios del Excel
   const facturas = (D.facturas||[]).filter(fac=>{
-    if(f.mes && !(fac.mes||'').startsWith(f.mes)) return false;
-    if(f.emisor!=='todos' && fac.emisor!==f.emisor) return false;
+    const facAnio = (fac.mes||'').slice(0,4);
+    const facMes  = (fac.mes||'').slice(5,7);
+    if(f.anio!=='todos' && facAnio!==f.anio) return false;
+    if(f.mes!=='todos'  && facMes!==f.mes)   return false;
+    if(f.emisor!=='todos' && (fac.emisor||'').trim()!==(f.emisor||'').trim()) return false;
     if(f.estado!=='todos' && fac.estado!==f.estado) return false;
     return true;
-  }).sort((a,b)=>(a.mes||'').localeCompare(b.mes||''));
+  }).sort((a,b)=>(b.mes||'').localeCompare(a.mes||''));
 
-  // Totals by moneda
-  const totUYU = facturas.filter(f=>f.moneda!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
-  const totUSD = facturas.filter(f=>f.moneda==='USD').reduce((s,f)=>s+Number(f.total||0),0);
+  // Totals by moneda — trim para evitar espacios
+  const totUYU = facturas.filter(f=>(f.moneda||'').trim()!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
+  const totUSD = facturas.filter(f=>(f.moneda||'').trim()==='USD').reduce((s,f)=>s+Number(f.total||0),0);
   
   // Summary cards
   const sumRow = el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px',marginBottom:'20px'}});
@@ -3626,8 +3655,8 @@ function renderFacturasTab(c, D, emisores, mesActual) {
 
   Object.entries(byEmisor).forEach(([emisor, facs])=>{
     const card = el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'20px',marginBottom:'16px'}});
-    const totE_UYU = facs.filter(f=>f.moneda!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
-    const totE_USD = facs.filter(f=>f.moneda==='USD').reduce((s,f)=>s+Number(f.total||0),0);
+    const totE_UYU = facs.filter(f=>(f.moneda||'').trim()!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
+    const totE_USD = facs.filter(f=>(f.moneda||'').trim()==='USD').reduce((s,f)=>s+Number(f.total||0),0);
     card.append(el('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px',flexWrap:'wrap',gap:'8px'}},
       el('h3',{style:{margin:0,fontSize:'15px',fontWeight:700,color:'#4F46E5'}},emisor),
       el('div',{style:{display:'flex',gap:'12px',fontSize:'12px',color:'#64748B',fontWeight:600}},
@@ -3644,7 +3673,7 @@ function renderFacturasTab(c, D, emisores, mesActual) {
         el('span',{style:{fontSize:'12px',fontFamily:"'DM Mono',monospace",color:'#94A3B8',minWidth:'70px'}},fac.mes||''),
         el('span',{style:{flex:1,fontSize:'13px',fontWeight:600,color:'#0F172A'}},fac.cliente||'Sin cliente'),
         fac.concepto?el('span',{style:{fontSize:'11px',color:'#64748B',flex:1}},fac.concepto):'',
-        el('span',{style:{fontSize:'13px',fontWeight:700,color:'#0F172A',whiteSpace:'nowrap'}},(fac.moneda==='USD'?'U$S ':'$')+Number(fac.total||0).toLocaleString()),
+        el('span',{style:{fontSize:'13px',fontWeight:700,color:'#0F172A',whiteSpace:'nowrap'}},((fac.moneda||'').trim()==='USD'?'U$S ':'$')+Number(fac.total||0).toLocaleString()),
         badge,
         el('button',{style:{background:'none',border:'1px solid #E2E8F0',borderRadius:'6px',padding:'4px 8px',cursor:'pointer',fontSize:'11px',color:'#475569'},
           onClick:()=>{state.modals.editFactura=fac;render();}},'✏️'),
