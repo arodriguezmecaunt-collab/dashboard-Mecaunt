@@ -76,7 +76,8 @@ body{font-family:'DM Sans',sans-serif;background:#F1F5F9;min-height:100vh}
 <div id="app"></div>
 <script>
 // Auto-detect API URL when served from Apps Script
-const SCRIPT_URL = document.getElementById('scriptUrl')?.value || '';
+const _rawUrl = document.getElementById('scriptUrl')?.value || '';
+const SCRIPT_URL = _rawUrl.startsWith('https://') ? _rawUrl : '';
 const $ = (sel, ctx=document) => ctx.querySelector(sel);
 const $$ = (sel, ctx=document) => [...ctx.querySelectorAll(sel)];
 const el = (tag, attrs={}, ...children) => {
@@ -255,31 +256,14 @@ async function apiPost(payload) {
   try {
     lastWriteTime = Date.now();
     payload._code = state.accessCode;
-
-    // Cuando está embebido en Apps Script, usamos google.script.run
-    if(SCRIPT_URL && typeof google !== 'undefined' && google.script) {
-      return new Promise((resolve) => {
-        google.script.run
-          .withSuccessHandler(result => {
-            if(result && result.error) { state.error = 'Error: '+result.error; render(); }
-            resolve(result);
-          })
-          .withFailureHandler(err => {
-            state.error = 'Error sync: '+(err.message||err);
-            render();
-            resolve(null);
-          })
-          .handlePost(JSON.stringify(payload));
-      });
-    }
-
-    // Modo standalone: fetch normal
-    const resp = await fetch(state.apiUrl, {method:'POST', body:JSON.stringify(payload), redirect:'follow'});
+    const encoded = encodeURIComponent(JSON.stringify(payload));
+    const url = state.apiUrl + '?write=1&payload=' + encoded;
+    const resp = await fetch(url, {method:'GET', redirect:'follow'});
     try {
       const text = await resp.text();
       const result = JSON.parse(text);
       if(result.error) { state.error = 'Error: '+result.error; render(); }
-    } catch(e) { /* response not JSON, probably OK */ }
+    } catch(e) { /* OK */ }
   } catch(e) { state.error = 'Error sync: '+e.message; render(); }
 }
 
