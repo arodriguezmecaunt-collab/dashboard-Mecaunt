@@ -97,7 +97,7 @@ const el = (tag, attrs={}, ...children) => {
 
 // State
 let state = {
-  data: { empresas:[], vencimientos:[], plantillas:[], tareas:[], empleados:[{id:"e1",nombre:"Admin",color:"#3B82F6"}], horasTrabajadas:[], accesos:[], documentos:[], ausencias:[], comentarios:[], categoriasEmp:[], licencias:[], licPlanificacion:[], licRestringidos:[], licSolicitudes:[] },
+  data: { empresas:[], vencimientos:[], plantillas:[], tareas:[], empleados:[{id:"e1",nombre:"Admin",color:"#3B82F6"}], horasTrabajadas:[], accesos:[], documentos:[], ausencias:[], comentarios:[], categoriasEmp:[], licencias:[], licPlanificacion:[], licRestringidos:[], licSolicitudes:[], facturas:[], honorarios:[] },
   apiUrl: localStorage.getItem('estudio-api-url') || SCRIPT_URL || '',
   accessCode: localStorage.getItem('estudio-access-code') || '',
   accessName: localStorage.getItem('estudio-access-name') || '',
@@ -173,6 +173,8 @@ async function apiGet(url, code) {
   d.licSolicitudes = uniq(d.licSolicitudes||[]);
   d.licPlanificacion = uniq(d.licPlanificacion);
   d.licRestringidos = uniq(d.licRestringidos);
+  d.facturas = uniq(d.facturas||[]);
+  d.honorarios = uniq(d.honorarios||[]);
   state.isAdmin = d._isAdmin || false;
   state.accessName = d._userName || state.accessName || '';
   return d;
@@ -322,7 +324,9 @@ async function connect(url, code) {
     localStorage.setItem('estudio-access-code', state.accessCode);
     localStorage.setItem('estudio-access-name', state.accessName);
     state.lastSync = new Date(); state.modals = {};
-    autoGenerate(state.viewYear, state.viewMonth); // runs in background
+    // Auto-generate current month on login
+    const now = new Date();
+    autoGenerate(now.getFullYear(), now.getMonth()+1);
     // Si el Apps Script es viejo y no devuelve licencias, las buscamos por separado
     if(!d.licencias || d.licencias.length === 0) fetchLicenciasSheets();
   } catch(e) { state.error = 'Error: '+e.message; }
@@ -479,7 +483,7 @@ function render() {
     if(sb) sb.classList.remove('open');
     if(ov) ov.classList.remove('open');
   };
-  const navItems = [{id:'home',label:'Inicio',icon:'\ud83c\udfe0'},{id:'calendario',label:'Calendario',icon:'\ud83d\udcc5'},{id:'tareas',label:'Tareas',icon:'\u2611'},{id:'plantillas',label:'Plantillas',icon:'\u2699'},{id:'empresas',label:'Empresas',icon:'\u2302'},{id:'horas',label:'Horas',icon:'\u23f0'},{id:'equipo',label:'Equipo',icon:'\u263a'},{id:'ausencias',label:'Ausencias',icon:'\ud83d\udccb'},{id:'licencias',label:'Licencias',icon:'\ud83c\udfd6'}];
+  const navItems = [{id:'home',label:'Inicio',icon:'\ud83c\udfe0'},{id:'calendario',label:'Calendario',icon:'\ud83d\udcc5'},{id:'tareas',label:'Tareas',icon:'\u2611'},{id:'plantillas',label:'Plantillas',icon:'\u2699'},{id:'empresas',label:'Empresas',icon:'\u2302'},{id:'horas',label:'Horas',icon:'\u23f0'},{id:'equipo',label:'Equipo',icon:'\u263a'},{id:'ausencias',label:'Ausencias',icon:'\ud83d\udccb'},{id:'licencias',label:'Licencias',icon:'\ud83c\udfd6'},{id:'facturacion',label:'Facturación',icon:'💰'}];
   if(state.isAdmin) navItems.push({id:'accesos',label:'Accesos',icon:'\ud83d\udd12'});
   const sidebar = el('div',{className:'sidebar'},
     el('div',{style:{padding:'24px 20px 12px'}},
@@ -516,6 +520,7 @@ function render() {
   else if(state.section==='accesos' && state.isAdmin) renderAccesos(content);
   else if(state.section==='ausencias') renderAusencias(content);
   else if(state.section==='licencias') renderLicencias(content);
+  else if(state.section==='facturacion') renderFacturacion(content);
 
   // Modals
   if(state.modals.addVenc) renderModalVenc(app);
@@ -1600,8 +1605,13 @@ function renderEmpresaDetail(c) {
     const orgS=el('span',{style:{padding:'3px 8px',borderRadius:'5px',fontSize:'11px',fontWeight:700}},v.org);
     orgS.style.background=orgC(v.org).bg;
     orgS.style.color=orgC(v.org).text;
+    const dateInput = el('input',{type:'date',value:v.venc||'',style:{fontSize:'12px',fontFamily:"'DM Mono',monospace",fontWeight:600,border:'1px solid #E2E8F0',borderRadius:'6px',padding:'3px 6px',color:'#0F172A',background:'#F8FAFC',cursor:'pointer'}});
+    dateInput.addEventListener('change',e=>{
+      v.venc=e.target.value;
+      apiPost({action:'update',sheet:'Vencimientos',id:v.id,data:{venc:e.target.value}});
+    });
     card2.append(el('div',{style:{display:'flex',alignItems:'center',gap:'12px',padding:'10px 0',borderBottom:'1px solid #F1F5F9'}},
-      el('span',{style:{fontSize:'12px',fontFamily:"'DM Mono',monospace",fontWeight:600,minWidth:'80px'}},fmt(v.venc)),
+      dateInput,
       orgS,
       el('span',{style:{flex:1,fontSize:'13px',color:'#475569'}},v.obligacion),
       badge
@@ -3508,6 +3518,388 @@ function renderModalAddLicRest(app) {
     }},'💾 Agregar')
   );
   makeModal('🚫 Agregar días restringidos',[fMes,fDia,fHasta,fMot,btns],app);
+}
+
+
+// ===== FACTURACION =====
+function renderFacturacion(c) {
+  const D = state.data;
+  const emisores = ['Joaquin Rodriguez','Alberto Rodriguez','Barberousse','Tuverta','Estudio Mecaunt'];
+  const hoy = new Date();
+  const mesActual = hoy.getFullYear()+'-'+pad2(hoy.getMonth()+1);
+
+  // Tabs
+  if(!state.facTab) state.facTab = 'facturas';
+  const tabBar = el('div',{style:{display:'flex',gap:'8px',marginBottom:'20px',flexWrap:'wrap'}});
+  [{id:'facturas',label:'📄 Facturas'},{id:'honorarios',label:'💵 Honorarios'}].forEach(t=>{
+    const btn = el('button',{
+      style:{padding:'8px 18px',borderRadius:'8px',fontWeight:700,fontSize:'13px',cursor:'pointer',
+        background:state.facTab===t.id?'#4F46E5':'#fff',
+        color:state.facTab===t.id?'#fff':'#475569',
+        border:state.facTab===t.id?'none':'1px solid #E2E8F0',
+        fontFamily:"'DM Sans',sans-serif"},
+      onClick:()=>{state.facTab=t.id;render();}
+    }, t.label);
+    tabBar.append(btn);
+  });
+  c.append(makeHeader('Facturación','Control de facturación y honorarios',[
+    state.facTab==='facturas'
+      ? el('button',{className:'btn btn-primary',onClick:()=>{state.modals.addFactura=true;render();}},'+ Factura')
+      : el('button',{className:'btn btn-primary',onClick:()=>{state.modals.addHonorario=true;render();}},'+ Honorario')
+  ]));
+  c.append(tabBar);
+
+  if(state.facTab==='facturas') renderFacturasTab(c, D, emisores, mesActual);
+  else renderHonorariosTab(c, D);
+
+  if(state.modals.addFactura) renderModalAddFactura(c, emisores);
+  if(state.modals.editFactura) renderModalEditFactura(c, emisores);
+  if(state.modals.addHonorario) renderModalAddHonorario(c);
+  if(state.modals.editHonorario) renderModalEditHonorario(c);
+}
+
+function renderFacturasTab(c, D, emisores, mesActual) {
+  // Filters
+  if(!state.facFiltros) state.facFiltros = {mes: mesActual, emisor:'todos', estado:'todos'};
+  const f = state.facFiltros;
+
+  const filRow = el('div',{style:{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'16px',alignItems:'center'}});
+  
+  const mesInp = el('input',{type:'month',value:f.mes||mesActual,className:'filter-select'});
+  mesInp.addEventListener('change',e=>{f.mes=e.target.value;render();});
+
+  const emisorSel = el('select',{className:'filter-select'});
+  emisorSel.append(el('option',{value:'todos'},'Todos los emisores'));
+  emisores.forEach(em=>{const o=el('option',{value:em},em);if(f.emisor===em)o.selected=true;emisorSel.append(o);});
+  emisorSel.addEventListener('change',e=>{f.emisor=e.target.value;render();});
+
+  const estadoSel = el('select',{className:'filter-select'});
+  [{v:'todos',l:'Todos los estados'},{v:'pendiente',l:'Pendiente'},{v:'emitida',l:'Emitida'},{v:'cobrada',l:'Cobrada'}].forEach(s=>{
+    const o=el('option',{value:s.v},s.l);if(f.estado===s.v)o.selected=true;estadoSel.append(o);
+  });
+  estadoSel.addEventListener('change',e=>{f.estado=e.target.value;render();});
+
+  filRow.append(mesInp, emisorSel, estadoSel);
+  c.append(filRow);
+
+  // Filter facturas
+  const facturas = (D.facturas||[]).filter(fac=>{
+    if(f.mes && !(fac.mes||'').startsWith(f.mes)) return false;
+    if(f.emisor!=='todos' && fac.emisor!==f.emisor) return false;
+    if(f.estado!=='todos' && fac.estado!==f.estado) return false;
+    return true;
+  }).sort((a,b)=>(a.mes||'').localeCompare(b.mes||''));
+
+  // Totals by moneda
+  const totUYU = facturas.filter(f=>f.moneda!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
+  const totUSD = facturas.filter(f=>f.moneda==='USD').reduce((s,f)=>s+Number(f.total||0),0);
+  
+  // Summary cards
+  const sumRow = el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px',marginBottom:'20px'}});
+  const mkSum = (label,val,color) => {
+    const card = el('div',{style:{background:'#fff',border:'1px solid #E2E8F0',borderRadius:'12px',padding:'16px'}});
+    card.append(el('p',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',margin:'0 0 4px'}},label));
+    card.append(el('p',{style:{fontSize:'20px',fontWeight:800,color,margin:0}},val));
+    return card;
+  };
+  sumRow.append(
+    mkSum('Facturas',facturas.length,'#0F172A'),
+    mkSum('Total UYU','$'+Math.round(totUYU).toLocaleString(),'#047857'),
+    mkSum('Total USD','U$S '+Math.round(totUSD).toLocaleString(),'#1D4ED8'),
+    mkSum('Pendientes',facturas.filter(f=>f.estado==='pendiente').length,'#DC2626'),
+    mkSum('Cobradas',facturas.filter(f=>f.estado==='cobrada').length,'#059669')
+  );
+  c.append(sumRow);
+
+  // Group by emisor
+  const byEmisor = {};
+  facturas.forEach(fac=>{
+    const em = fac.emisor||'Sin emisor';
+    if(!byEmisor[em]) byEmisor[em]=[];
+    byEmisor[em].push(fac);
+  });
+
+  if(!facturas.length){
+    c.append(el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'40px',textAlign:'center',color:'#94A3B8',fontSize:'14px'}},'Sin facturas para este período'));
+    return;
+  }
+
+  Object.entries(byEmisor).forEach(([emisor, facs])=>{
+    const card = el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'20px',marginBottom:'16px'}});
+    const totE_UYU = facs.filter(f=>f.moneda!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
+    const totE_USD = facs.filter(f=>f.moneda==='USD').reduce((s,f)=>s+Number(f.total||0),0);
+    card.append(el('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px',flexWrap:'wrap',gap:'8px'}},
+      el('h3',{style:{margin:0,fontSize:'15px',fontWeight:700,color:'#4F46E5'}},emisor),
+      el('div',{style:{display:'flex',gap:'12px',fontSize:'12px',color:'#64748B',fontWeight:600}},
+        totE_UYU?el('span',{},'UYU $'+Math.round(totE_UYU).toLocaleString()):'',
+        totE_USD?el('span',{},'USD U$S'+Math.round(totE_USD).toLocaleString()):''
+      )
+    ));
+    facs.forEach(fac=>{
+      const estadoColors = {pendiente:{bg:'#FEF3C7',t:'#92400E'},emitida:{bg:'#DBEAFE',t:'#1E40AF'},cobrada:{bg:'#DCFCE7',t:'#166534'}};
+      const sc = estadoColors[fac.estado||'pendiente']||estadoColors.pendiente;
+      const row = el('div',{style:{display:'flex',alignItems:'center',gap:'10px',padding:'10px 0',borderBottom:'1px solid #F1F5F9',flexWrap:'wrap'}});
+      const badge = el('span',{style:{padding:'2px 8px',borderRadius:'5px',fontSize:'11px',fontWeight:700,background:sc.bg,color:sc.t,whiteSpace:'nowrap'}},fac.estado||'pendiente');
+      row.append(
+        el('span',{style:{fontSize:'12px',fontFamily:"'DM Mono',monospace",color:'#94A3B8',minWidth:'70px'}},fac.mes||''),
+        el('span',{style:{flex:1,fontSize:'13px',fontWeight:600,color:'#0F172A'}},fac.cliente||'Sin cliente'),
+        fac.concepto?el('span',{style:{fontSize:'11px',color:'#64748B',flex:1}},fac.concepto):'',
+        el('span',{style:{fontSize:'13px',fontWeight:700,color:'#0F172A',whiteSpace:'nowrap'}},(fac.moneda==='USD'?'U$S ':'$')+Number(fac.total||0).toLocaleString()),
+        badge,
+        el('button',{style:{background:'none',border:'1px solid #E2E8F0',borderRadius:'6px',padding:'4px 8px',cursor:'pointer',fontSize:'11px',color:'#475569'},
+          onClick:()=>{state.modals.editFactura=fac;render();}},'✏️'),
+        el('button',{className:'trash-btn',onClick:()=>{
+          if(!confirm('Eliminar factura?'))return;
+          D.facturas=D.facturas.filter(x=>x.id!==fac.id);
+          apiPost({action:'delete',sheet:'Facturas',id:fac.id});render();
+        },innerHTML:'🗑'})
+      );
+      // Ajuste info
+      if(fac.ajuste && Number(fac.ajuste)!==0){
+        row.append(el('span',{style:{fontSize:'10px',color:'#7C3AED',fontWeight:600}},fac.ajuste+'% ajuste'));
+      }
+      card.append(row);
+    });
+    c.append(card);
+  });
+}
+
+function renderHonorariosTab(c, D) {
+  if(!state.honFiltros) state.honFiltros = {estado:'todos'};
+  const f = state.honFiltros;
+
+  const filRow = el('div',{style:{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'16px'}});
+  const estadoSel = el('select',{className:'filter-select'});
+  [{v:'todos',l:'Todos'},{v:'pendiente',l:'Pendiente'},{v:'cobrado',l:'Cobrado'}].forEach(s=>{
+    const o=el('option',{value:s.v},s.l);if(f.estado===s.v)o.selected=true;estadoSel.append(o);
+  });
+  estadoSel.addEventListener('change',e=>{f.estado=e.target.value;render();});
+  filRow.append(estadoSel);
+  c.append(filRow);
+
+  const honorarios = (D.honorarios||[]).filter(h=>{
+    if(f.estado!=='todos' && h.estado!==f.estado) return false;
+    return true;
+  }).sort((a,b)=>(b.fechaDevengo||'').localeCompare(a.fechaDevengo||''));
+
+  // Totals
+  const pendUYU = honorarios.filter(h=>h.estado!=='cobrado'&&h.moneda!=='USD').reduce((s,h)=>s+Number(h.monto||0),0);
+  const pendUSD = honorarios.filter(h=>h.estado!=='cobrado'&&h.moneda==='USD').reduce((s,h)=>s+Number(h.monto||0),0);
+
+  const sumRow = el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px',marginBottom:'20px'}});
+  const mkSum = (label,val,color)=>{
+    const card=el('div',{style:{background:'#fff',border:'1px solid #E2E8F0',borderRadius:'12px',padding:'16px'}});
+    card.append(el('p',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',margin:'0 0 4px'}},label));
+    card.append(el('p',{style:{fontSize:'20px',fontWeight:800,color,margin:0}},val));
+    return card;
+  };
+  sumRow.append(
+    mkSum('Total',honorarios.length,'#0F172A'),
+    mkSum('Pendiente UYU','$'+Math.round(pendUYU).toLocaleString(),'#DC2626'),
+    mkSum('Pendiente USD','U$S'+Math.round(pendUSD).toLocaleString(),'#DC2626'),
+    mkSum('Cobrados',honorarios.filter(h=>h.estado==='cobrado').length,'#059669')
+  );
+  c.append(sumRow);
+
+  if(!honorarios.length){
+    c.append(el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'40px',textAlign:'center',color:'#94A3B8',fontSize:'14px'}},'Sin honorarios registrados'));
+    return;
+  }
+
+  const card = el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'20px'}});
+  honorarios.forEach(h=>{
+    const cobrado = h.estado==='cobrado';
+    const row = el('div',{style:{display:'flex',alignItems:'center',gap:'10px',padding:'12px 0',borderBottom:'1px solid #F1F5F9',flexWrap:'wrap',opacity:cobrado?'0.6':'1'}});
+    row.append(
+      el('span',{style:{fontSize:'12px',fontFamily:"'DM Mono',monospace",color:'#94A3B8',minWidth:'90px'}},fmt(h.fechaDevengo)||''),
+      el('span',{style:{flex:1,fontSize:'13px',fontWeight:600,color:'#0F172A'}},h.cliente||'Sin cliente'),
+      h.concepto?el('span',{style:{fontSize:'11px',color:'#64748B',flex:1}},h.concepto):'',
+      el('span',{style:{fontSize:'13px',fontWeight:700,color:'#0F172A',whiteSpace:'nowrap'}},(h.moneda==='USD'?'U$S ':'$')+Number(h.monto||0).toLocaleString()),
+      el('button',{
+        style:{padding:'4px 12px',borderRadius:'6px',fontSize:'11px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',
+          background:cobrado?'#F1F5F9':'#DCFCE7',color:cobrado?'#94A3B8':'#166534',border:'none'},
+        onClick:()=>{
+          h.estado=cobrado?'pendiente':'cobrado';
+          h.fechaCobro=cobrado?'':new Date().toISOString().slice(0,10);
+          apiPost({action:'update',sheet:'Honorarios',id:h.id,data:{estado:h.estado,fechaCobro:h.fechaCobro}});render();
+        }
+      }, cobrado?'✓ Cobrado':'Marcar cobrado'),
+      el('button',{style:{background:'none',border:'1px solid #E2E8F0',borderRadius:'6px',padding:'4px 8px',cursor:'pointer',fontSize:'11px'},
+        onClick:()=>{state.modals.editHonorario=h;render();}},'✏️'),
+      el('button',{className:'trash-btn',onClick:()=>{
+        if(!confirm('Eliminar honorario?'))return;
+        D.honorarios=D.honorarios.filter(x=>x.id!==h.id);
+        apiPost({action:'delete',sheet:'Honorarios',id:h.id});render();
+      },innerHTML:'🗑'})
+    );
+    if(cobrado&&h.fechaCobro) row.append(el('span',{style:{fontSize:'10px',color:'#94A3B8'}},fmt(h.fechaCobro)));
+    card.append(row);
+  });
+  c.append(card);
+}
+
+function renderModalAddFactura(c, emisores) {
+  const D = state.data;
+  const f1 = makeFormField('Mes (AAAA-MM)','month','','');
+  const f2 = makeFormField('Cliente','text','','Nombre del cliente');
+  const f3 = makeFormField('Concepto','text','','Descripcion del servicio');
+  const f4 = makeFormField('Monto (sin IVA)','number','','0');
+  
+  const monSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);monSel.append(o);});
+  
+  const emisorSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  emisores.forEach(em=>{const o=el('option',{value:em},em);emisorSel.append(o);});
+
+  const ajustInp = makeFormField('Ajuste %','number','0','0 = sin ajuste');
+  
+  const estadoSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'pendiente',l:'Pendiente'},{v:'emitida',l:'Emitida'},{v:'cobrada',l:'Cobrada'}].forEach(s=>{const o=el('option',{value:s.v},s.l);estadoSel.append(o);});
+
+  const saveBtn = el('button',{className:'btn btn-primary',onClick:()=>{
+    const mes = f1.querySelector('input').value;
+    const cliente = f2.querySelector('input').value.trim();
+    const concepto = f3.querySelector('input').value.trim();
+    const monto = Number(f4.querySelector('input').value)||0;
+    const moneda = monSel.value;
+    const emisor = emisorSel.value;
+    const ajuste = Number(ajustInp.querySelector('input').value)||0;
+    const estado = estadoSel.value;
+    const iva = moneda==='UYU' ? Math.round(monto*0.22*100)/100 : 0;
+    const montoAjustado = ajuste ? Math.round(monto*(1+ajuste/100)) : monto;
+    const total = Math.round((montoAjustado + iva)*100)/100;
+    if(!mes||!cliente) return alert('Mes y cliente son obligatorios');
+    const fac = {id:'fac'+Date.now(),mes,cliente,concepto,monto,montoAjustado,iva,total,moneda,emisor,ajuste,estado,fechaCreacion:new Date().toISOString().slice(0,10)};
+    D.facturas.push(fac);
+    apiPost({action:'add',sheet:'Facturas',data:fac});
+    state.modals.addFactura=false;render();
+  }},'💾 Guardar');
+
+  makeModal('Nueva Factura',[
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Emisor'),
+    emisorSel,
+    f1,f2,f3,f4,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
+    monSel,
+    ajustInp,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Estado'),
+    estadoSel,
+    saveBtn
+  ], c);
+}
+
+function renderModalEditFactura(c, emisores) {
+  const fac = state.modals.editFactura;
+  const D = state.data;
+
+  const f1 = makeFormField('Mes','month',fac.mes||'','');
+  const f2 = makeFormField('Cliente','text',fac.cliente||','Nombre');
+  const f3 = makeFormField('Concepto','text',fac.concepto||'','');
+  const f4 = makeFormField('Monto (sin IVA)','number',fac.monto||0,'0');
+  const f5 = makeFormField('Ajuste %','number',fac.ajuste||0,'0');
+
+  const monSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);if(fac.moneda===m.v)o.selected=true;monSel.append(o);});
+
+  const emisorSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  emisores.forEach(em=>{const o=el('option',{value:em},em);if(fac.emisor===em)o.selected=true;emisorSel.append(o);});
+
+  const estadoSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'pendiente',l:'Pendiente'},{v:'emitida',l:'Emitida'},{v:'cobrada',l:'Cobrada'}].forEach(s=>{const o=el('option',{value:s.v},s.l);if(fac.estado===s.v)o.selected=true;estadoSel.append(o);});
+
+  const saveBtn = el('button',{className:'btn btn-primary',onClick:()=>{
+    const mes = f1.querySelector('input').value;
+    const cliente = f2.querySelector('input').value.trim();
+    const concepto = f3.querySelector('input').value.trim();
+    const monto = Number(f4.querySelector('input').value)||0;
+    const ajuste = Number(f5.querySelector('input').value)||0;
+    const moneda = monSel.value;
+    const emisor = emisorSel.value;
+    const estado = estadoSel.value;
+    const iva = moneda==='UYU' ? Math.round(monto*0.22*100)/100 : 0;
+    const montoAjustado = ajuste ? Math.round(monto*(1+ajuste/100)) : monto;
+    const total = Math.round((montoAjustado + iva)*100)/100;
+    Object.assign(fac,{mes,cliente,concepto,monto,montoAjustado,iva,total,moneda,emisor,ajuste,estado});
+    apiPost({action:'update',sheet:'Facturas',id:fac.id,data:fac});
+    state.modals.editFactura=null;render();
+  }},'💾 Guardar');
+
+  makeModal('Editar Factura',[
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Emisor'),
+    emisorSel, f1, f2, f3, f4,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
+    monSel, f5,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Estado'),
+    estadoSel, saveBtn
+  ], c);
+}
+
+function renderModalAddHonorario(c) {
+  const D = state.data;
+  const f1 = makeFormField('Cliente','text','','Nombre del cliente');
+  const f2 = makeFormField('Concepto','text','','Descripcion');
+  const f3 = makeFormField('Monto','number','','0');
+  const f4 = makeFormField('Fecha devengo','date',new Date().toISOString().slice(0,10),'');
+
+  const monSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);monSel.append(o);});
+
+  const frec = el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'unico',l:'Único'},{v:'mensual',l:'Mensual recurrente'}].forEach(s=>{const o=el('option',{value:s.v},s.l);frec.append(o);});
+
+  const saveBtn = el('button',{className:'btn btn-primary',onClick:()=>{
+    const cliente = f1.querySelector('input').value.trim();
+    const concepto = f2.querySelector('input').value.trim();
+    const monto = Number(f3.querySelector('input').value)||0;
+    const fechaDevengo = f4.querySelector('input').value;
+    if(!cliente||!monto) return alert('Cliente y monto son obligatorios');
+    const hon = {id:'hon'+Date.now(),cliente,concepto,monto,moneda:monSel.value,frecuencia:frec.value,fechaDevengo,estado:'pendiente',fechaCobro:''};
+    D.honorarios.push(hon);
+    apiPost({action:'add',sheet:'Honorarios',data:hon});
+    state.modals.addHonorario=false;render();
+  }},'💾 Guardar');
+
+  makeModal('Nuevo Honorario',[f1,f2,f3,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
+    monSel,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Frecuencia'),
+    frec, f4, saveBtn
+  ], c);
+}
+
+function renderModalEditHonorario(c) {
+  const h = state.modals.editHonorario;
+  const D = state.data;
+  const f1 = makeFormField('Cliente','text',h.cliente||'','');
+  const f2 = makeFormField('Concepto','text',h.concepto||'','');
+  const f3 = makeFormField('Monto','number',h.monto||0,'');
+  const f4 = makeFormField('Fecha devengo','date',h.fechaDevengo||'','');
+
+  const monSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);if(h.moneda===m.v)o.selected=true;monSel.append(o);});
+
+  const estadoSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'pendiente',l:'Pendiente'},{v:'cobrado',l:'Cobrado'}].forEach(s=>{const o=el('option',{value:s.v},s.l);if(h.estado===s.v)o.selected=true;estadoSel.append(o);});
+
+  const saveBtn = el('button',{className:'btn btn-primary',onClick:()=>{
+    Object.assign(h,{
+      cliente:f1.querySelector('input').value.trim(),
+      concepto:f2.querySelector('input').value.trim(),
+      monto:Number(f3.querySelector('input').value)||0,
+      fechaDevengo:f4.querySelector('input').value,
+      moneda:monSel.value,
+      estado:estadoSel.value
+    });
+    apiPost({action:'update',sheet:'Honorarios',id:h.id,data:h});
+    state.modals.editHonorario=null;render();
+  }},'💾 Guardar');
+
+  makeModal('Editar Honorario',[f1,f2,f3,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
+    monSel,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Estado'),
+    estadoSel, f4, saveBtn
+  ], c);
 }
 
 // INIT
