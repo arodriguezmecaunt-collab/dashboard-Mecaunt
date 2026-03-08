@@ -148,7 +148,16 @@ async function apiGet(url, code) {
   const c = code || state.accessCode;
   const r = await fetch(url+'?action=getAll&code='+encodeURIComponent(c));
   if(!r.ok) throw new Error('HTTP '+r.status);
-  const d = await r.json();
+  const text = await r.text();
+  let d;
+  try {
+    d = JSON.parse(text);
+  } catch(e) {
+    // Apps Script devolvió HTML (error de servidor) — mostrar mensaje claro
+    const match = text.match(/<title>(.*?)<\/title>/i);
+    const hint = match ? match[1] : 'Error del servidor';
+    throw new Error('El servidor devolvió un error inesperado. Revisá el Apps Script. Detalle: ' + hint);
+  }
   if(d.error) throw new Error(d.error);
   d.empresas = (d.empresas||[]).map(e=>{
     const clean = v => (!v || v==='None' || v==='undefined') ? '' : String(v);
