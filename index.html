@@ -97,11 +97,13 @@ const el = (tag, attrs={}, ...children) => {
 
 // State
 let state = {
-  data: { empresas:[], vencimientos:[], plantillas:[], tareas:[], empleados:[{id:"e1",nombre:"Admin",color:"#3B82F6"}], horasTrabajadas:[], accesos:[], documentos:[], ausencias:[], comentarios:[], categoriasEmp:[], licencias:[], licPlanificacion:[], licRestringidos:[], licSolicitudes:[], facturas:[], honorarios:[] },
+  data: { empresas:[], vencimientos:[], plantillas:[], tareas:[], empleados:[{id:"e1",nombre:"Admin",color:"#3B82F6"}], horasTrabajadas:[], accesos:[], documentos:[], ausencias:[], comentarios:[], categoriasEmp:[], licencias:[], licPlanificacion:[], licRestringidos:[], licSolicitudes:[], facturas:[], honorarios:[], honorariosConfig:[] },
   apiUrl: localStorage.getItem('estudio-api-url') || SCRIPT_URL || '',
   accessCode: localStorage.getItem('estudio-access-code') || '',
   accessName: localStorage.getItem('estudio-access-name') || '',
   isAdmin: false,
+  canFacturacion: false,
+  emisoresPermitidos: [], // [] = todos
   section: 'home',
   search: '',
   selEmp: null,
@@ -148,16 +150,7 @@ async function apiGet(url, code) {
   const c = code || state.accessCode;
   const r = await fetch(url+'?action=getAll&code='+encodeURIComponent(c));
   if(!r.ok) throw new Error('HTTP '+r.status);
-  const text = await r.text();
-  let d;
-  try {
-    d = JSON.parse(text);
-  } catch(e) {
-    // Apps Script devolvió HTML (error de servidor) — mostrar mensaje claro
-    const match = text.match(/<title>(.*?)<\/title>/i);
-    const hint = match ? match[1] : 'Error del servidor';
-    throw new Error('El servidor devolvió un error inesperado. Revisá el Apps Script. Detalle: ' + hint);
-  }
+  const d = await r.json();
   if(d.error) throw new Error(d.error);
   d.empresas = (d.empresas||[]).map(e=>{
     const clean = v => (!v || v==='None' || v==='undefined') ? '' : String(v);
@@ -184,7 +177,10 @@ async function apiGet(url, code) {
   d.licRestringidos = uniq(d.licRestringidos);
   d.facturas = uniq(d.facturas||[]);
   d.honorarios = uniq(d.honorarios||[]);
+  d.honorariosConfig = uniq(d.honorariosConfig||[]);
   state.isAdmin = d._isAdmin || false;
+  state.canFacturacion = d._canFacturacion || state.isAdmin || false;
+  state.emisoresPermitidos = d._emisoresPermitidos || [];
   state.accessName = d._userName || state.accessName || '';
   return d;
 }
@@ -493,7 +489,7 @@ function render() {
     if(ov) ov.classList.remove('open');
   };
   const navItems = [{id:'home',label:'Inicio',icon:'\ud83c\udfe0'},{id:'calendario',label:'Calendario',icon:'\ud83d\udcc5'},{id:'tareas',label:'Tareas',icon:'\u2611'},{id:'plantillas',label:'Plantillas',icon:'\u2699'},{id:'empresas',label:'Empresas',icon:'\u2302'},{id:'horas',label:'Horas',icon:'\u23f0'},{id:'equipo',label:'Equipo',icon:'\u263a'},{id:'ausencias',label:'Ausencias',icon:'\ud83d\udccb'},{id:'licencias',label:'Licencias',icon:'\ud83c\udfd6'}];
-  if(state.isAdmin) navItems.push({id:'facturacion',label:'Facturación',icon:'💰'});
+  if(state.isAdmin || state.canFacturacion) navItems.push({id:'facturacion',label:'Facturación',icon:'💰'});
   if(state.isAdmin) navItems.push({id:'accesos',label:'Accesos',icon:'\ud83d\udd12'});
   const sidebar = el('div',{className:'sidebar'},
     el('div',{style:{padding:'24px 20px 12px'}},
@@ -530,7 +526,7 @@ function render() {
   else if(state.section==='accesos' && state.isAdmin) renderAccesos(content);
   else if(state.section==='ausencias') renderAusencias(content);
   else if(state.section==='licencias') renderLicencias(content);
-  else if(state.section==='facturacion' && state.isAdmin) renderFacturacion(content);
+  else if(state.section==='facturacion' && (state.isAdmin || state.canFacturacion)) renderFacturacion(content);
 
   // Modals
   if(state.modals.addVenc) renderModalVenc(app);
@@ -2111,7 +2107,12 @@ function renderAccesos(c) {
     const isSelf = a.codigo===state.accessCode;
 
     const statusBadge = el('span',{className:'badge',style:{background:isActive?'#ECFDF5':'#FEF2F2',color:isActive?'#059669':'#DC2626',border:'1px solid '+(isActive?'#A7F3D0':'#FECACA')}},isActive?'Activo':'Revocado');
-    const rolBadge = el('span',{className:'badge',style:{background:isAdm?'#FEF3C7':'#F0F9FF',color:isAdm?'#B45309':'#0284C7',border:'1px solid '+(isAdm?'#FDE68A':'#BAE6FD')}},isAdm?'Admin':'Usuario');
+    const isFac = a.rol==='facturacion';
+    const rolBadge = el('span',{className:'badge',style:{
+      background:isAdm?'#FEF3C7':isFac?'#EEF2FF':'#F0F9FF',
+      color:isAdm?'#B45309':isFac?'#4F46E5':'#0284C7',
+      border:'1px solid '+(isAdm?'#FDE68A':isFac?'#C7D2FE':'#BAE6FD')
+    }},isAdm?'Admin':isFac?'Facturación':'Usuario');
 
     const actionsDiv = el('div',{style:{display:'flex',gap:'6px'}});
     if(!isSelf) {
@@ -2156,25 +2157,43 @@ function renderAccesos(c) {
 }
 
 function renderModalAcceso(app) {
+  const EMISORES_LIST = ['Estudio Mecaunt','Tuverta','Barberousse','Alberto Rodriguez','Joaquin Rodriguez'];
   const f1=makeFormField('Nombre','text','','Ej: Maria Lopez');
   const f1b=makeFormField('Vincular a empleado','select',{selected:'',options:[{value:'',label:'Sin vincular'},...state.data.empleados.map(e=>({value:e.id,label:e.nombre}))]});
-  const f2=makeFormField('Rol','select',{selected:'usuario',options:[{value:'usuario',label:'Usuario (solo ver y editar)'},{value:'admin',label:'Admin (puede gestionar accesos)'}]});
-  // Auto-generate a random code
+  const f2=makeFormField('Rol','select',{selected:'usuario',options:[{value:'usuario',label:'Usuario'},{value:'facturacion',label:'Facturación (ver y editar facturación)'},{value:'admin',label:'Admin (acceso total)'}]});
   const randomCode = Math.random().toString(36).slice(2,8).toUpperCase();
   const f3=makeFormField('Codigo','text',randomCode,'Se genera automaticamente');
+
+  // Emisores selector — solo visible si rol = facturacion
+  const selectedEmisores = new Set();
+  const emisoresWrap = el('div',{style:{display:'none',marginBottom:'12px'}});
+  emisoresWrap.append(el('label',{style:{display:'block',fontSize:'12px',fontWeight:600,color:'#64748B',marginBottom:'6px',textTransform:'uppercase',letterSpacing:'0.05em'}},'Emisores habilitados'));
+  emisoresWrap.append(el('p',{style:{fontSize:'11px',color:'#94A3B8',marginBottom:'8px',marginTop:'-2px'}},'Sin selección = ve todos los emisores'));
+  EMISORES_LIST.forEach(em=>{
+    const row=el('label',{style:{display:'flex',alignItems:'center',gap:'8px',padding:'6px 10px',cursor:'pointer',borderRadius:'8px',fontSize:'13px',color:'#0F172A',border:'1px solid #E2E8F0',marginBottom:'5px',background:'#FAFBFC'}});
+    const cb=el('input',{type:'checkbox',style:{accentColor:'#4F46E5'}});
+    cb.addEventListener('change',()=>{if(cb.checked)selectedEmisores.add(em);else selectedEmisores.delete(em);});
+    row.append(cb, em);
+    emisoresWrap.append(row);
+  });
+  if(f2._input) f2._input.addEventListener('change',()=>{
+    emisoresWrap.style.display = f2._input.value==='facturacion' ? 'block' : 'none';
+  });
+
   const btns=el('div',{style:{display:'flex',gap:'10px',justifyContent:'flex-end'}},
-    el('button',{className:'btn btn-secondary',onClick:()=>{state.modals={};render()}},'Cancelar'),
+    el('button',{className:'btn btn-secondary',onClick:()=>{state.modals={};render();}},'Cancelar'),
     el('button',{className:'btn btn-primary',onClick:()=>{
       const nombre=f1._input.value.trim(),empleadoId=f1b._input.value,rol=f2._input.value,codigo=f3._input.value.trim();
       if(!nombre||!codigo) return;
-      const a={id:'acc'+Date.now(),nombre,empleadoId,rol,codigo,activo:'true',fechaCreacion:todayStr};
+      const emisoresPerm = selectedEmisores.size>0 ? [...selectedEmisores].join(',') : '';
+      const a={id:'acc'+Date.now(),nombre,empleadoId,rol,codigo,activo:'true',emisoresPermitidos:emisoresPerm,fechaCreacion:todayStr};
       if(!state.data.accesos) state.data.accesos=[];
       state.data.accesos.push(a);
       apiPost({action:'add',sheet:'Accesos',data:a});
       state.modals={};render();
     }},'Crear Acceso')
   );
-  makeModal('Nuevo Acceso',[f1,f1b,f2,f3,
+  makeModal('Nuevo Acceso',[f1,f1b,f2,emisoresWrap,f3,
     el('div',{style:{background:'#FFFBEB',border:'1px solid #FDE68A',borderRadius:'10px',padding:'12px',marginBottom:'16px',fontSize:'12px',color:'#92400E',lineHeight:'1.6'}},
       'Compartile la URL del Apps Script y este codigo a la persona. Con eso puede entrar al dashboard.'
     ),
@@ -3531,132 +3550,533 @@ function renderModalAddLicRest(app) {
 }
 
 
-// ===== FACTURACION =====
+// ===== FACTURACION (nueva versión) =====
+// HonorariosConfig = catálogo de clientes con monto fijo mensual
+// Facturas         = historial de facturas emitidas
+
 function renderFacturacion(c) {
   const D = state.data;
-  const emisores = ['Joaquin Rodriguez','Alberto Rodriguez','Barberousse','Tuverta','Estudio Mecaunt'];
+
+  // Lazy load
+  if(!state.facturacionCargada && state.apiUrl && (state.isAdmin || state.canFacturacion)) {
+    state.facturacionCargada = 'loading';
+    fetch(state.apiUrl+'?action=getFacturacion&code='+encodeURIComponent(state.accessCode))
+      .then(r=>r.text()).then(t=>{
+        try {
+          const d = JSON.parse(t);
+          if(d.facturas) state.data.facturas = d.facturas;
+          if(d.honorarios) state.data.honorarios = d.honorarios;
+          if(d.honorariosConfig) state.data.honorariosConfig = d.honorariosConfig;
+          state.facturacionCargada = 'done';
+        } catch(e) { state.facturacionCargada = 'error'; }
+        render();
+      }).catch(()=>{ state.facturacionCargada = 'error'; render(); });
+  }
+
+  const EMISORES = ['Estudio Mecaunt','Tuverta','Barberousse','Alberto Rodriguez','Joaquin Rodriguez'];
   const hoy = new Date();
   const mesActual = hoy.getFullYear()+'-'+pad2(hoy.getMonth()+1);
+  if(!state.facTab) state.facTab = 'control';
+  if(!state.facFiltros) state.facFiltros = {anio: String(hoy.getFullYear()), mes: pad2(hoy.getMonth()+1), emisor:'todos'};
+
+  c.append(makeHeader('Facturación','Control mensual de facturación',[
+    state.facTab==='config'
+      ? el('button',{className:'btn btn-primary',onClick:()=>{state.modals.addHonConfig=true;render();}},'+ Cliente')
+      : (state.facTab==='facturas'
+        ? el('button',{className:'btn btn-primary',onClick:()=>{state.modals.addFactura=true;render();}},'+ Factura')
+        : '')
+  ]));
 
   // Tabs
-  if(!state.facTab) state.facTab = 'facturas';
-  const tabBar = el('div',{style:{display:'flex',gap:'8px',marginBottom:'20px',flexWrap:'wrap'}});
-  [{id:'facturas',label:'📄 Facturas'},{id:'honorarios',label:'💵 Honorarios'}].forEach(t=>{
-    const btn = el('button',{
-      style:{padding:'8px 18px',borderRadius:'8px',fontWeight:700,fontSize:'13px',cursor:'pointer',
-        background:state.facTab===t.id?'#4F46E5':'#fff',
-        color:state.facTab===t.id?'#fff':'#475569',
-        border:state.facTab===t.id?'none':'1px solid #E2E8F0',
-        fontFamily:"'DM Sans',sans-serif"},
+  const tabBar = el('div',{style:{display:'flex',gap:'6px',marginBottom:'20px',flexWrap:'wrap'}});
+  [{id:'control',label:'📋 Control del mes'},{id:'pendientes',label:'💸 Pendientes de cobro'},{id:'ajustes',label:'📈 Ajustes pendientes'},{id:'config',label:'⚙️ Clientes'},{id:'facturas',label:'🗃️ Historial'}].forEach(t=>{
+    const active = state.facTab===t.id;
+    tabBar.append(el('button',{
+      style:{padding:'7px 14px',borderRadius:'8px',fontWeight:700,fontSize:'12px',cursor:'pointer',
+        background:active?'#4F46E5':'#fff', color:active?'#fff':'#475569',
+        border:active?'none':'1px solid #E2E8F0', fontFamily:"'DM Sans',sans-serif"},
       onClick:()=>{state.facTab=t.id;render();}
-    }, t.label);
-    tabBar.append(btn);
+    }, t.label));
   });
-  c.append(makeHeader('Facturación','Control de facturación y honorarios',[
-    state.facTab==='facturas'
-      ? el('button',{className:'btn btn-primary',onClick:()=>{state.modals.addFactura=true;render();}},'+ Factura')
-      : el('button',{className:'btn btn-primary',onClick:()=>{state.modals.addHonorario=true;render();}},'+ Honorario')
-  ]));
   c.append(tabBar);
 
-  if(state.facTab==='facturas') renderFacturasTab(c, D, emisores, mesActual);
-  else renderHonorariosTab(c, D);
-
-  if(state.modals.addFactura) renderModalAddFactura(c, emisores);
-  if(state.modals.editFactura) renderModalEditFactura(c, emisores);
-  if(state.modals.addHonorario) renderModalAddHonorario(c);
-  if(state.modals.editHonorario) renderModalEditHonorario(c);
-}
-
-function renderFacturasTab(c, D, emisores, mesActual) {
-  // Filters
-  if(!state.facFiltros) state.facFiltros = {mes: mesActual, emisor:'todos', estado:'todos'};
-  const f = state.facFiltros;
-
-  const filRow = el('div',{style:{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'16px',alignItems:'center'}});
-  
-  const mesInp = el('input',{type:'month',value:f.mes||mesActual,className:'filter-select'});
-  mesInp.addEventListener('change',e=>{f.mes=e.target.value;render();});
-
-  const emisorSel = el('select',{className:'filter-select'});
-  emisorSel.append(el('option',{value:'todos'},'Todos los emisores'));
-  emisores.forEach(em=>{const o=el('option',{value:em},em);if(f.emisor===em)o.selected=true;emisorSel.append(o);});
-  emisorSel.addEventListener('change',e=>{f.emisor=e.target.value;render();});
-
-  const estadoSel = el('select',{className:'filter-select'});
-  [{v:'todos',l:'Todos los estados'},{v:'pendiente',l:'Pendiente'},{v:'emitida',l:'Emitida'},{v:'cobrada',l:'Cobrada'}].forEach(s=>{
-    const o=el('option',{value:s.v},s.l);if(f.estado===s.v)o.selected=true;estadoSel.append(o);
-  });
-  estadoSel.addEventListener('change',e=>{f.estado=e.target.value;render();});
-
-  filRow.append(mesInp, emisorSel, estadoSel);
-  c.append(filRow);
-
-  // Filter facturas
-  const facturas = (D.facturas||[]).filter(fac=>{
-    if(f.mes && !(fac.mes||'').startsWith(f.mes)) return false;
-    if(f.emisor!=='todos' && fac.emisor!==f.emisor) return false;
-    if(f.estado!=='todos' && fac.estado!==f.estado) return false;
-    return true;
-  }).sort((a,b)=>(a.mes||'').localeCompare(b.mes||''));
-
-  // Totals by moneda
-  const totUYU = facturas.filter(f=>f.moneda!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
-  const totUSD = facturas.filter(f=>f.moneda==='USD').reduce((s,f)=>s+Number(f.total||0),0);
-  
-  // Summary cards
-  const sumRow = el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px',marginBottom:'20px'}});
-  const mkSum = (label,val,color) => {
-    const card = el('div',{style:{background:'#fff',border:'1px solid #E2E8F0',borderRadius:'12px',padding:'16px'}});
-    card.append(el('p',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',margin:'0 0 4px'}},label));
-    card.append(el('p',{style:{fontSize:'20px',fontWeight:800,color,margin:0}},val));
-    return card;
-  };
-  sumRow.append(
-    mkSum('Facturas',facturas.length,'#0F172A'),
-    mkSum('Total UYU','$'+Math.round(totUYU).toLocaleString(),'#047857'),
-    mkSum('Total USD','U$S '+Math.round(totUSD).toLocaleString(),'#1D4ED8'),
-    mkSum('Pendientes',facturas.filter(f=>f.estado==='pendiente').length,'#DC2626'),
-    mkSum('Cobradas',facturas.filter(f=>f.estado==='cobrada').length,'#059669')
-  );
-  c.append(sumRow);
-
-  // Group by emisor
-  const byEmisor = {};
-  facturas.forEach(fac=>{
-    const em = fac.emisor||'Sin emisor';
-    if(!byEmisor[em]) byEmisor[em]=[];
-    byEmisor[em].push(fac);
-  });
-
-  if(!facturas.length){
-    c.append(el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'40px',textAlign:'center',color:'#94A3B8',fontSize:'14px'}},'Sin facturas para este período'));
+  if(state.facturacionCargada==='loading') {
+    c.append(el('div',{style:{textAlign:'center',padding:'60px',color:'#94A3B8',fontSize:'15px'}},'⏳ Cargando datos...'));
+    return;
+  }
+  if(state.facturacionCargada==='error') {
+    c.append(el('div',{style:{textAlign:'center',padding:'40px',color:'#DC2626',fontSize:'14px'}},'❌ Error al cargar. Recargá la página.'));
     return;
   }
 
-  Object.entries(byEmisor).forEach(([emisor, facs])=>{
-    const card = el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'20px',marginBottom:'16px'}});
-    const totE_UYU = facs.filter(f=>f.moneda!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
-    const totE_USD = facs.filter(f=>f.moneda==='USD').reduce((s,f)=>s+Number(f.total||0),0);
-    card.append(el('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px',flexWrap:'wrap',gap:'8px'}},
-      el('h3',{style:{margin:0,fontSize:'15px',fontWeight:700,color:'#4F46E5'}},emisor),
-      el('div',{style:{display:'flex',gap:'12px',fontSize:'12px',color:'#64748B',fontWeight:600}},
-        totE_UYU?el('span',{},'UYU $'+Math.round(totE_UYU).toLocaleString()):'',
-        totE_USD?el('span',{},'USD U$S'+Math.round(totE_USD).toLocaleString()):''
-      )
+  if(state.facTab==='control')    renderFacControl(c, D, EMISORES);
+  else if(state.facTab==='pendientes') renderFacPendientes(c, D);
+  else if(state.facTab==='ajustes')   renderFacAjustes(c, D, EMISORES);
+  else if(state.facTab==='config')    renderFacConfig(c, D, EMISORES);
+  else if(state.facTab==='facturas')  renderFacHistorial(c, D, EMISORES);
+
+  // Modals
+  if(state.modals.addHonConfig)  renderModalAddHonConfig(c, EMISORES);
+  if(state.modals.editHonConfig) renderModalEditHonConfig(c, EMISORES);
+  if(state.modals.addFactura)    renderModalAddFactura(c, EMISORES);
+  if(state.modals.editFactura)   renderModalEditFactura(c, EMISORES);
+}
+
+// ─── HELPERS ────────────────────────────────────────────────
+function facMesLabel(ym) {
+  if(!ym) return '';
+  const [y,m] = ym.split('-');
+  const nombres = ['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  return nombres[Number(m)]+' '+y;
+}
+
+function getHonConfig() {
+  return state.data.honorariosConfig || [];
+}
+
+function getFacturasMes(mes) {
+  return (state.data.facturas||[]).filter(f=>(f.mes||'').trim()===mes);
+}
+
+// ─── TAB 1: CONTROL DEL MES ─────────────────────────────────
+function renderFacControl(c, D, EMISORES) {
+  const f = state.facFiltros;
+  const hoy = new Date();
+
+  // Navegación mes con flechas
+  const MESES_CTL=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const prevMes=()=>{let m=Number(f.mes)-1,a=Number(f.anio);if(m<1){m=12;a--;}f.mes=pad2(m);f.anio=String(a);render();};
+  const nextMes=()=>{let m=Number(f.mes)+1,a=Number(f.anio);if(m>12){m=1;a++;}f.mes=pad2(m);f.anio=String(a);render();};
+  const btnArrow={background:'#fff',border:'1px solid #E2E8F0',borderRadius:'8px',padding:'6px 12px',cursor:'pointer',fontSize:'16px',fontWeight:700,color:'#475569',lineHeight:1};
+  const row = el('div',{style:{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'20px',alignItems:'center'}});
+  const navWrap=el('div',{style:{display:'flex',alignItems:'center',gap:'6px',background:'#fff',border:'1px solid #E2E8F0',borderRadius:'10px',padding:'4px 8px'}});
+  navWrap.append(
+    el('button',{style:btnArrow,onClick:prevMes},'‹'),
+    el('span',{style:{fontWeight:700,fontSize:'14px',color:'#0F172A',minWidth:'110px',textAlign:'center'}},MESES_CTL[Number(f.mes)-1]+' '+f.anio),
+    el('button',{style:btnArrow,onClick:nextMes},'›')
+  );
+  const emisorSel = el('select',{className:'filter-select'});
+  emisorSel.append(el('option',{value:'todos'},'Todos los emisores'));
+  EMISORES.forEach(em=>{const o=el('option',{value:em},em);if(f.emisor===em)o.selected=true;emisorSel.append(o);});
+  emisorSel.addEventListener('change',e=>{f.emisor=e.target.value;render();});
+
+  row.append(navWrap, emisorSel);
+  c.append(row);
+
+  const mesKey = f.anio+'-'+f.mes; // e.g. "2026-03"
+
+  // Auto-generar facturas para clientes automáticos que no tienen factura este mes
+  {
+    config.forEach(h=>{
+      if(!h.automatico) return;
+      // Chequear frecuencia
+      const mesMes = mesKey.slice(5,7);
+      if((h.frecuencia||'mensual')==='anual' && (h.mesAnual||'01')!==mesMes) return;
+      const yaExiste = (state.data.facturas||[]).find(fac=>
+        (fac.mes||'').trim()===mesKey &&
+        (fac.cliente||'').trim().toLowerCase()===(h.empresaNombre||h.cliente||'').trim().toLowerCase()
+      );
+      if(!yaExiste){
+        const monto=Number(h.monto||0);
+        const moneda=(h.moneda||'UYU').trim();
+        const iva=moneda==='UYU'?Math.round(monto*0.22):0;
+        const total=monto+iva;
+        const fac={id:'fac'+Date.now()+Math.round(Math.random()*9999),mes:mesKey,
+          cliente:h.empresaNombre||h.cliente||'',concepto:'Honorarios '+facMesLabel(mesKey),
+          monto,montoAjustado:monto,iva,total,moneda,emisor:h.emisor||'',
+          ajuste:0,estado:'emitida',automatico:true,
+          fechaCreacion:new Date().toISOString().slice(0,10),fechaCobro:''};
+        state.data.facturas.push(fac);
+        apiPost({action:'add',sheet:'Facturas',data:fac});
+      }
+    });
+  }
+  const config = getHonConfig().filter(h=> f.emisor==='todos' || h.emisor===f.emisor);
+  const facturasMes = getFacturasMes(mesKey);
+
+  // Para cada cliente en config, buscar si tiene factura en ese mes
+  const pendientes = [], facturados = [], cobrados = [];
+  config.forEach(h=>{
+    const factura = facturasMes.find(f=>{
+      const cli = (f.cliente||'').trim().toUpperCase();
+      const hon = (h.empresaNombre||h.cliente||'').trim().toUpperCase();
+      return cli===hon || cli.includes(hon.slice(0,10)) || hon.includes(cli.slice(0,10));
+    });
+    if(!factura) pendientes.push({...h, _estado:'pendiente'});
+    else if((factura.estado||'').trim()==='cobrada') cobrados.push({...h, _estado:'cobrada', _factura:factura});
+    else facturados.push({...h, _estado:'emitida', _factura:factura});
+  });
+
+  // Resumen cards
+  const totPend = pendientes.reduce((s,h)=>s + (h.moneda==='USD'?0:Number(h.monto||0)),0);
+  const totPendUSD = pendientes.reduce((s,h)=>s + (h.moneda==='USD'?Number(h.monto||0):0),0);
+  const totFact = facturados.reduce((s,h)=>s+Number(h._factura?.total||h.monto||0),0);
+  const totCob  = cobrados.reduce((s,h)=>s+Number(h._factura?.total||h.monto||0),0);
+
+  const cards = el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:'12px',marginBottom:'24px'}});
+  const mkCard = (label, val, sub, color, bg) => {
+    const card = el('div',{style:{background:bg,border:'1px solid '+color+'33',borderRadius:'14px',padding:'16px 18px'}});
+    card.append(
+      el('p',{style:{fontSize:'11px',fontWeight:700,color:color,textTransform:'uppercase',margin:'0 0 6px',letterSpacing:'0.5px'}},label),
+      el('p',{style:{fontSize:'22px',fontWeight:800,color:'#0F172A',margin:'0 0 2px'}},val),
+      sub ? el('p',{style:{fontSize:'11px',color:'#94A3B8',margin:0}},sub) : ''
+    );
+    return card;
+  };
+  cards.append(
+    mkCard('Clientes totales', config.length, facMesLabel(mesKey), '#4F46E5','#EEF2FF'),
+    mkCard('Sin facturar', pendientes.length,
+      totPend?'$'+Math.round(totPend).toLocaleString()+(totPendUSD?' + U$S'+totPendUSD:''):totPendUSD?'U$S'+totPendUSD:'',
+      '#DC2626','#FEF2F2'),
+    mkCard('Facturadas', facturados.length, '$'+Math.round(totFact).toLocaleString(), '#D97706','#FFFBEB'),
+    mkCard('Cobradas', cobrados.length, '$'+Math.round(totCob).toLocaleString(), '#059669','#F0FDF4'),
+  );
+  c.append(cards);
+
+  // Función para render grupo
+  const mkGrupo = (titulo, lista, colorBg, colorTxt, colorDot) => {
+    if(!lista.length) return;
+    const wrap = el('div',{style:{marginBottom:'20px'}});
+    wrap.append(el('div',{style:{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px'}},
+      el('span',{style:{width:'10px',height:'10px',borderRadius:'50%',background:colorDot,display:'inline-block',flexShrink:0}}),
+      el('h3',{style:{margin:0,fontSize:'13px',fontWeight:700,color:'#0F172A'}},titulo+' ('+lista.length+')')
+    ));
+    // Agrupar por emisor
+    const porEmisor={};
+    lista.forEach(h=>{const em=h.emisor||'Sin emisor';if(!porEmisor[em])porEmisor[em]=[];porEmisor[em].push(h);});
+    Object.entries(porEmisor).forEach(([emisor,items])=>{
+      const subWrap=el('div',{style:{background:'#fff',border:'1px solid #E2E8F0',borderRadius:'12px',marginBottom:'10px',overflow:'hidden'}});
+      subWrap.append(el('div',{style:{padding:'8px 14px',background:'#F8FAFC',borderBottom:'1px solid #E2E8F0',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+        el('span',{style:{fontSize:'11px',fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'0.5px'}},emisor),
+        el('span',{style:{fontSize:'11px',fontWeight:600,color:'#94A3B8'}},items.length+' cliente'+(items.length!==1?'s':''))
+      ));
+      items.forEach(h=>{
+        const fac = h._factura;
+        const monto = fac ? Number(fac.total||0) : Number(h.monto||0);
+        const moneda = (fac?.moneda||h.moneda||'UYU').trim();
+        const montoStr = (moneda==='USD'?'U$S ':'$')+monto.toLocaleString();
+        const row = el('div',{style:{padding:'10px 14px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap',borderBottom:'1px solid #F1F5F9'}});
+        row.append(
+          el('span',{style:{width:'7px',height:'7px',borderRadius:'50%',background:colorDot,flexShrink:0}}),
+          el('span',{style:{flex:1,fontWeight:600,fontSize:'13px',color:'#0F172A',minWidth:'130px'}},h.empresaNombre||h.cliente||'Sin nombre'),
+          el('span',{style:{fontWeight:700,fontSize:'13px',whiteSpace:'nowrap'}},montoStr)
+        );
+        if(h._estado==='pendiente'){
+          row.append(el('button',{
+            style:{padding:'4px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:700,cursor:'pointer',background:'#F1F5F9',color:'#334155',border:'1px solid #E2E8F0'},
+            onClick:()=>{
+              const monto=Number(h.monto||0);
+              const moneda=(h.moneda||'UYU').trim();
+              const iva=moneda==='UYU'?Math.round(monto*0.22):0;
+              const total=monto+iva;
+              const fac={id:'fac'+Date.now()+Math.round(Math.random()*9999),mes:mesKey,
+                cliente:h.empresaNombre||h.cliente||'',concepto:'Honorarios '+facMesLabel(mesKey),
+                monto,montoAjustado:monto,iva,total,moneda,emisor:h.emisor||'',
+                ajuste:0,estado:'emitida',automatico:false,
+                fechaCreacion:new Date().toISOString().slice(0,10),fechaCobro:''};
+              state.data.facturas.push(fac);
+              apiPost({action:'add',sheet:'Facturas',data:fac});
+              render();
+            }
+          },'✅ Emitida'));
+        } else if(h._estado==='emitida'){
+          row.append(
+            el('button',{style:{padding:'4px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:700,cursor:'pointer',background:'#059669',color:'#fff',border:'none'},
+              onClick:()=>{const factura=h._factura;factura.estado='cobrada';factura.fechaCobro=new Date().toISOString().slice(0,10);apiPost({action:'update',sheet:'Facturas',id:factura.id,data:factura});render();}
+            },'✅ Cobrada'),
+            el('button',{style:{padding:'4px 8px',borderRadius:'6px',fontSize:'11px',cursor:'pointer',background:'#F1F5F9',border:'1px solid #E2E8F0',color:'#475569'},
+              onClick:()=>{state.modals.editFactura=h._factura;render();}
+            },'✏️'),
+            h._factura?.automatico?el('span',{style:{fontSize:'9px',background:'#EEF2FF',color:'#4F46E5',padding:'1px 6px',borderRadius:'4px',fontWeight:700}},'AUTO'):''
+          );
+        } else {
+          const fc = fac?.fechaCobro ? el('span',{style:{fontSize:'11px',color:'#059669',fontWeight:600}},'Cobrada '+fac.fechaCobro) : '';
+          const autoBadge = fac?.automatico ? el('span',{style:{fontSize:'9px',background:'#EEF2FF',color:'#4F46E5',padding:'1px 6px',borderRadius:'4px',fontWeight:700}},'AUTO') : '';
+          row.append(fc,autoBadge);
+        }
+        subWrap.append(row);
+      });
+      wrap.append(subWrap);
+    });
+    c.append(wrap);
+  };
+
+  if(!config.length) {
+    c.append(el('div',{style:{background:'#fff',borderRadius:'14px',border:'1px solid #E2E8F0',padding:'40px',textAlign:'center'}},
+      el('p',{style:{color:'#94A3B8',marginBottom:'12px'}},'No hay clientes configurados.'),
+      el('button',{className:'btn btn-primary',onClick:()=>{state.facTab='config';render();}},'⚙️ Ir a Clientes')
+    ));
+    return;
+  }
+
+  mkGrupo('❌ Sin facturar', pendientes, '#FEF2F2','#DC2626','#EF4444');
+  mkGrupo('⏳ Facturadas, sin cobrar', facturados, '#FFFBEB','#D97706','#F59E0B');
+  mkGrupo('✅ Cobradas', cobrados, '#F0FDF4','#059669','#10B981');
+}
+
+// ─── TAB 2: PENDIENTES DE COBRO ─────────────────────────────
+function renderFacPendientes(c, D) {
+  const todas = (D.facturas||[]).filter(f=>(f.estado||'').trim()!=='cobrada');
+  if(!todas.length) {
+    c.append(el('div',{style:{background:'#F0FDF4',border:'1px solid #BBF7D0',borderRadius:'14px',padding:'40px',textAlign:'center',color:'#059669',fontSize:'14px',fontWeight:700}},'🎉 Todo cobrado. Sin pendientes.'));
+    return;
+  }
+
+  // Agrupar por mes
+  const porMes = {};
+  todas.forEach(f=>{
+    const k = f.mes||'Sin mes';
+    if(!porMes[k]) porMes[k]=[];
+    porMes[k].push(f);
+  });
+
+  // Cards resumen
+  const totUYU = todas.filter(f=>(f.moneda||'').trim()!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
+  const totUSD = todas.filter(f=>(f.moneda||'').trim()==='USD').reduce((s,f)=>s+Number(f.total||0),0);
+  const cards = el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px',marginBottom:'24px'}});
+
+  const hoy = new Date();
+  const mesActual = hoy.getFullYear()+'-'+pad2(hoy.getMonth()+1);
+  const vencidas = todas.filter(f=>(f.mes||'')< mesActual);
+
+  [[todas.length+' facturas','#4F46E5','#EEF2FF'],
+   ['$'+Math.round(totUYU).toLocaleString()+' UYU','#D97706','#FFFBEB'],
+   ['U$S '+Math.round(totUSD).toLocaleString(),'#1D4ED8','#DBEAFE'],
+   [vencidas.length+' vencidas','#DC2626','#FEF2F2']
+  ].forEach(([v,c2,bg])=>{
+    const card=el('div',{style:{background:bg,borderRadius:'12px',padding:'14px 16px'}});
+    card.append(el('p',{style:{fontSize:'20px',fontWeight:800,color:'#0F172A',margin:0}},v));
+    cards.append(card);
+  });
+  c.append(cards);
+
+  // Lista por mes (más viejo primero)
+  Object.keys(porMes).sort().forEach(mes=>{
+    const facs = porMes[mes];
+    const esVencido = mes < mesActual;
+    const wrap = el('div',{style:{marginBottom:'16px'}});
+    wrap.append(el('div',{style:{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}},
+      esVencido ? el('span',{style:{background:'#FEE2E2',color:'#DC2626',fontSize:'10px',fontWeight:700,padding:'2px 7px',borderRadius:'5px'}},'VENCIDO') : '',
+      el('h3',{style:{margin:0,fontSize:'13px',fontWeight:700,color:esVencido?'#DC2626':'#475569'}}, facMesLabel(mes)||mes)
     ));
     facs.forEach(fac=>{
-      const estadoColors = {pendiente:{bg:'#FEF3C7',t:'#92400E'},emitida:{bg:'#DBEAFE',t:'#1E40AF'},cobrada:{bg:'#DCFCE7',t:'#166534'}};
-      const sc = estadoColors[fac.estado||'pendiente']||estadoColors.pendiente;
-      const row = el('div',{style:{display:'flex',alignItems:'center',gap:'10px',padding:'10px 0',borderBottom:'1px solid #F1F5F9',flexWrap:'wrap'}});
-      const badge = el('span',{style:{padding:'2px 8px',borderRadius:'5px',fontSize:'11px',fontWeight:700,background:sc.bg,color:sc.t,whiteSpace:'nowrap'}},fac.estado||'pendiente');
+      const moneda=(fac.moneda||'').trim();
+      const row=el('div',{style:{background:'#fff',border:'1px solid '+(esVencido?'#FECACA':'#E2E8F0'),borderRadius:'10px',padding:'10px 14px',display:'flex',gap:'12px',alignItems:'center',flexWrap:'wrap',marginBottom:'4px'}});
       row.append(
-        el('span',{style:{fontSize:'12px',fontFamily:"'DM Mono',monospace",color:'#94A3B8',minWidth:'70px'}},fac.mes||''),
-        el('span',{style:{flex:1,fontSize:'13px',fontWeight:600,color:'#0F172A'}},fac.cliente||'Sin cliente'),
+        el('span',{style:{flex:1,fontWeight:600,fontSize:'13px',color:'#0F172A'}},fac.cliente||''),
+        el('span',{style:{fontSize:'11px',color:'#94A3B8'}},fac.emisor||''),
+        el('span',{style:{fontWeight:700,fontSize:'13px',whiteSpace:'nowrap'}},(moneda==='USD'?'U$S ':'$')+Number(fac.total||0).toLocaleString()),
+        el('button',{style:{padding:'4px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:700,cursor:'pointer',background:'#059669',color:'#fff',border:'none'},
+          onClick:()=>{
+            fac.estado='cobrada'; fac.fechaCobro=new Date().toISOString().slice(0,10);
+            apiPost({action:'update',sheet:'Facturas',id:fac.id,data:fac}); render();
+          }},'✅ Cobrada'),
+        el('button',{style:{padding:'4px 8px',borderRadius:'6px',fontSize:'11px',cursor:'pointer',background:'#F1F5F9',border:'1px solid #E2E8F0',color:'#475569'},
+          onClick:()=>{state.modals.editFactura=fac;render();}},'✏️')
+      );
+      wrap.append(row);
+    });
+    c.append(wrap);
+  });
+}
+
+// ─── TAB 3: AJUSTES PENDIENTES ──────────────────────────────
+function renderFacAjustes(c, D, EMISORES) {
+  const config = getHonConfig();
+  const hoy = new Date();
+
+  // Clientes con más de 12 meses sin ajuste
+  const pendAjuste = config.filter(h=>{
+    if(!h.fechaUltimoAjuste) return true; // nunca ajustó
+    const ult = new Date(h.fechaUltimoAjuste);
+    const meses = (hoy.getFullYear()-ult.getFullYear())*12 + (hoy.getMonth()-ult.getMonth());
+    return meses >= 12;
+  });
+
+  // Próximos a vencer (entre 9 y 11 meses)
+  const proximos = config.filter(h=>{
+    if(!h.fechaUltimoAjuste) return false;
+    const ult = new Date(h.fechaUltimoAjuste);
+    const meses = (hoy.getFullYear()-ult.getFullYear())*12 + (hoy.getMonth()-ult.getMonth());
+    return meses >= 9 && meses < 12;
+  });
+
+  if(!pendAjuste.length && !proximos.length) {
+    c.append(el('div',{style:{background:'#F0FDF4',border:'1px solid #BBF7D0',borderRadius:'14px',padding:'40px',textAlign:'center',color:'#059669',fontSize:'14px',fontWeight:700}},'✅ Ningún cliente requiere ajuste en este momento.'));
+  }
+
+  const mkSeccion = (titulo, lista, colorBg, colorBorder, colorTxt) => {
+    if(!lista.length) return;
+    const wrap = el('div',{style:{marginBottom:'24px'}});
+    wrap.append(el('h3',{style:{fontSize:'13px',fontWeight:700,color:colorTxt,marginBottom:'10px'}},titulo+' ('+lista.length+')'));
+    lista.sort((a,b)=>(a.fechaUltimoAjuste||'').localeCompare(b.fechaUltimoAjuste||'')).forEach(h=>{
+      const ult = h.fechaUltimoAjuste ? new Date(h.fechaUltimoAjuste) : null;
+      const meses = ult ? Math.floor((hoy-ult)/(1000*60*60*24*30)) : null;
+      const row = el('div',{style:{background:colorBg,border:'1px solid '+colorBorder,borderRadius:'10px',padding:'12px 16px',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap',marginBottom:'6px'}});
+      row.append(
+        el('span',{style:{flex:1,fontWeight:600,fontSize:'13px',color:'#0F172A'}},h.empresaNombre||h.cliente||''),
+        el('span',{style:{fontSize:'11px',color:'#64748B',background:'#F1F5F9',padding:'2px 7px',borderRadius:'5px',fontWeight:600}},h.emisor||''),
+        el('span',{style:{fontWeight:700,fontSize:'13px',whiteSpace:'nowrap',color:'#0F172A'}},
+          ((h.moneda||'').trim()==='USD'?'U$S ':'$')+Number(h.monto||0).toLocaleString()),
+        ult
+          ? el('span',{style:{fontSize:'11px',color:colorTxt,fontWeight:700,whiteSpace:'nowrap'}},meses+' meses sin ajuste')
+          : el('span',{style:{fontSize:'11px',color:'#DC2626',fontWeight:700}},'Sin fecha de ajuste registrada'),
+        el('button',{
+          style:{padding:'4px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:700,cursor:'pointer',background:'#4F46E5',color:'#fff',border:'none'},
+          onClick:()=>{state.modals.editHonConfig=h;render();}
+        },'📈 Registrar ajuste')
+      );
+      wrap.append(row);
+    });
+    c.append(wrap);
+  };
+
+  mkSeccion('🔴 Ajuste pendiente (+12 meses)', pendAjuste, '#FEF2F2','#FECACA','#DC2626');
+  mkSeccion('🟡 Próximos a vencer (9-11 meses)', proximos, '#FFFBEB','#FDE68A','#D97706');
+}
+
+// ─── TAB 4: CONFIGURACIÓN DE CLIENTES ───────────────────────
+function renderFacConfig(c, D, EMISORES) {
+  const config = getHonConfig();
+
+  if(!config.length) {
+    c.append(el('div',{style:{background:'#EEF2FF',borderRadius:'14px',padding:'30px',textAlign:'center'}},
+      el('p',{style:{color:'#4F46E5',fontWeight:600,marginBottom:'12px'}},'Cargá los clientes con su monto mensual fijo.'),
+      el('button',{className:'btn btn-primary',onClick:()=>{state.modals.addHonConfig=true;render();}},'+ Agregar primer cliente')
+    ));
+    return;
+  }
+
+  // Agrupar por emisor
+  const porEmisor = {};
+  config.forEach(h=>{
+    const em = h.emisor||'Sin emisor';
+    if(!porEmisor[em]) porEmisor[em]=[];
+    porEmisor[em].push(h);
+  });
+
+  Object.entries(porEmisor).forEach(([emisor, lista])=>{
+    const totUYU = lista.filter(h=>(h.moneda||'').trim()!=='USD').reduce((s,h)=>s+Number(h.monto||0),0);
+    const totUSD = lista.filter(h=>(h.moneda||'').trim()==='USD').reduce((s,h)=>s+Number(h.monto||0),0);
+    const card = el('div',{style:{background:'#fff',border:'1px solid #E2E8F0',borderRadius:'14px',padding:'18px',marginBottom:'16px'}});
+    card.append(el('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px',flexWrap:'wrap',gap:'8px'}},
+      el('h3',{style:{margin:0,fontSize:'14px',fontWeight:700,color:'#4F46E5'}},emisor),
+      el('div',{style:{fontSize:'12px',color:'#64748B',fontWeight:600}},
+        (totUYU?'$'+Math.round(totUYU).toLocaleString()+' UYU ':'')+
+        (totUSD?'U$S '+Math.round(totUSD).toLocaleString():'')
+      )
+    ));
+
+    lista.sort((a,b)=>(a.empresaNombre||'').localeCompare(b.empresaNombre||'')).forEach(h=>{
+      const hoy = new Date();
+      const ult = h.fechaUltimoAjuste ? new Date(h.fechaUltimoAjuste) : null;
+      const meses = ult ? Math.floor((hoy-ult)/(1000*60*60*24*30)) : null;
+      const ajusteAlerta = !ult || meses >= 12;
+      const row = el('div',{style:{display:'flex',alignItems:'center',gap:'10px',padding:'8px 0',borderBottom:'1px solid #F1F5F9',flexWrap:'wrap'}});
+      row.append(
+        el('span',{style:{flex:1,fontSize:'13px',fontWeight:600,color:'#0F172A',minWidth:'140px',display:'flex',alignItems:'center',gap:'6px'}},
+          h.empresaNombre||h.cliente||'',
+          h.automatico?el('span',{style:{fontSize:'9px',background:'#EEF2FF',color:'#4F46E5',padding:'1px 6px',borderRadius:'4px',fontWeight:700}},(h.frecuencia||'mensual')==='anual'?'AUTO ANUAL':'AUTO'):''),
+        el('span',{style:{fontSize:'13px',fontWeight:700,color:'#0F172A',whiteSpace:'nowrap'}},
+          ((h.moneda||'').trim()==='USD'?'U$S ':'$')+Number(h.monto||0).toLocaleString()),
+        ajusteAlerta
+          ? el('span',{style:{fontSize:'10px',background:'#FEE2E2',color:'#DC2626',padding:'2px 7px',borderRadius:'5px',fontWeight:700}},'⚠️ Sin ajuste')
+          : el('span',{style:{fontSize:'10px',background:'#DCFCE7',color:'#166534',padding:'2px 7px',borderRadius:'5px',fontWeight:600}},
+              'Ajuste: '+h.fechaUltimoAjuste),
+        el('button',{style:{padding:'3px 8px',borderRadius:'6px',fontSize:'11px',cursor:'pointer',background:'#F1F5F9',border:'1px solid #E2E8F0',color:'#475569'},
+          onClick:()=>{state.modals.editHonConfig=h;render();}},'✏️'),
+        el('button',{className:'trash-btn',onClick:()=>{
+          if(!confirm('Eliminar '+h.empresaNombre+'?')) return;
+          state.data.honorariosConfig=state.data.honorariosConfig.filter(x=>x.id!==h.id);
+          apiPost({action:'delete',sheet:'HonorariosConfig',id:h.id}); render();
+        },innerHTML:'🗑'})
+      );
+      card.append(row);
+    });
+    c.append(card);
+  });
+}
+
+// ─── TAB 5: HISTORIAL ────────────────────────────────────────
+function renderFacHistorial(c, D, EMISORES) {
+  const f = state.facFiltros;
+  const hoy = new Date();
+
+  const filRow = el('div',{style:{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'16px',alignItems:'center'}});
+  const anioSel = el('select',{className:'filter-select'});
+  ['todos','2024','2025','2026','2027'].forEach(a=>{
+    const o=el('option',{value:a},a==='todos'?'Todos los años':a); if(f.anio===a||(a==='todos'&&!f.anio))o.selected=true; anioSel.append(o);
+  });
+  anioSel.addEventListener('change',e=>{f.anio=e.target.value;render();});
+
+  const mesSel = el('select',{className:'filter-select'});
+  mesSel.append(el('option',{value:'todos'},'Todos los meses'));
+  ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'].forEach((mn,i)=>{
+    const v=pad2(i+1); const o=el('option',{value:v},mn); if(f.mes===v)o.selected=true; mesSel.append(o);
+  });
+  mesSel.addEventListener('change',e=>{f.mes=e.target.value;render();});
+
+  const emisorSel = el('select',{className:'filter-select'});
+  emisorSel.append(el('option',{value:'todos'},'Todos los emisores'));
+  EMISORES.forEach(em=>{const o=el('option',{value:em},em);if(f.emisor===em)o.selected=true;emisorSel.append(o);});
+  emisorSel.addEventListener('change',e=>{f.emisor=e.target.value;render();});
+
+  const estadoSel = el('select',{className:'filter-select'});
+  [{v:'todos',l:'Todos'},{v:'pendiente',l:'Pendiente'},{v:'emitida',l:'Emitida'},{v:'cobrada',l:'Cobrada'}].forEach(s=>{
+    const o=el('option',{value:s.v},s.l);if((f.estado||'todos')===s.v)o.selected=true;estadoSel.append(o);
+  });
+  estadoSel.addEventListener('change',e=>{f.estado=e.target.value;render();});
+
+  const btnClear=el('button',{style:{padding:'6px 12px',borderRadius:'8px',fontSize:'12px',cursor:'pointer',background:'#F1F5F9',border:'1px solid #CBD5E1',color:'#475569',fontWeight:600},
+    onClick:()=>{state.facFiltros={anio:'todos',mes:'todos',emisor:'todos',estado:'todos'};render();}},'🔄 Ver todo');
+  filRow.append(anioSel, mesSel, emisorSel, estadoSel, btnClear);
+  c.append(filRow);
+
+  const facturas = (D.facturas||[]).filter(fac=>{
+    const anio=(fac.mes||'').slice(0,4), mes2=(fac.mes||'').slice(5,7);
+    if(f.anio!=='todos'&&anio!==f.anio) return false;
+    if(f.mes!=='todos'&&mes2!==f.mes) return false;
+    if(f.emisor!=='todos'&&(fac.emisor||'').trim()!==f.emisor) return false;
+    if((f.estado||'todos')!=='todos'&&fac.estado!==f.estado) return false;
+    return true;
+  }).sort((a,b)=>(b.mes||'').localeCompare(a.mes||''));
+
+  const totUYU=facturas.filter(f=>(f.moneda||'').trim()!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
+  const totUSD=facturas.filter(f=>(f.moneda||'').trim()==='USD').reduce((s,f)=>s+Number(f.total||0),0);
+
+  const sumRow=el('div',{style:{display:'flex',gap:'12px',marginBottom:'16px',flexWrap:'wrap'}});
+  [[facturas.length+' facturas','#0F172A'],['$'+Math.round(totUYU).toLocaleString()+' UYU','#047857'],['U$S '+Math.round(totUSD).toLocaleString(),'#1D4ED8']].forEach(([v,col])=>{
+    const s=el('div',{style:{background:'#fff',border:'1px solid #E2E8F0',borderRadius:'10px',padding:'10px 16px'}});
+    s.append(el('span',{style:{fontSize:'14px',fontWeight:800,color:col}},v)); sumRow.append(s);
+  });
+  c.append(sumRow);
+
+  if(!facturas.length){c.append(el('div',{style:{textAlign:'center',padding:'40px',color:'#94A3B8'}},'Sin facturas para este período'));return;}
+
+  // Group by emisor
+  const porEmisor={};
+  facturas.forEach(fac=>{const em=fac.emisor||'Sin emisor';if(!porEmisor[em])porEmisor[em]=[];porEmisor[em].push(fac);});
+
+  Object.entries(porEmisor).forEach(([emisor,facs])=>{
+    const eUYU=facs.filter(f=>(f.moneda||'').trim()!=='USD').reduce((s,f)=>s+Number(f.total||0),0);
+    const eUSD=facs.filter(f=>(f.moneda||'').trim()==='USD').reduce((s,f)=>s+Number(f.total||0),0);
+    const card=el('div',{style:{background:'#fff',borderRadius:'14px',border:'1px solid #E2E8F0',padding:'18px',marginBottom:'14px'}});
+    card.append(el('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px',flexWrap:'wrap',gap:'6px'}},
+      el('h3',{style:{margin:0,fontSize:'14px',fontWeight:700,color:'#4F46E5'}},emisor),
+      el('div',{style:{fontSize:'12px',color:'#64748B',fontWeight:600}},
+        (eUYU?'$'+Math.round(eUYU).toLocaleString()+' UYU ':'')+(eUSD?'U$S '+Math.round(eUSD).toLocaleString():''))
+    ));
+    facs.forEach(fac=>{
+      const sc={pendiente:{bg:'#FEF3C7',t:'#92400E'},emitida:{bg:'#DBEAFE',t:'#1E40AF'},cobrada:{bg:'#DCFCE7',t:'#166534'}}[fac.estado||'pendiente']||{bg:'#FEF3C7',t:'#92400E'};
+      const moneda=(fac.moneda||'').trim();
+      const row=el('div',{style:{display:'flex',alignItems:'center',gap:'10px',padding:'8px 0',borderBottom:'1px solid #F8FAFC',flexWrap:'wrap'}});
+      row.append(
+        el('span',{style:{fontSize:'12px',fontFamily:"'DM Mono',monospace",color:'#94A3B8',minWidth:'65px'}},fac.mes||''),
+        el('span',{style:{flex:1,fontSize:'13px',fontWeight:600,color:'#0F172A'}},fac.cliente||''),
         fac.concepto?el('span',{style:{fontSize:'11px',color:'#64748B',flex:1}},fac.concepto):'',
-        el('span',{style:{fontSize:'13px',fontWeight:700,color:'#0F172A',whiteSpace:'nowrap'}},(fac.moneda==='USD'?'U$S ':'$')+Number(fac.total||0).toLocaleString()),
-        badge,
-        el('button',{style:{background:'none',border:'1px solid #E2E8F0',borderRadius:'6px',padding:'4px 8px',cursor:'pointer',fontSize:'11px',color:'#475569'},
+        el('span',{style:{fontSize:'13px',fontWeight:700,whiteSpace:'nowrap'}},(moneda==='USD'?'U$S ':'$')+Number(fac.total||0).toLocaleString()),
+        el('span',{style:{padding:'2px 8px',borderRadius:'5px',fontSize:'11px',fontWeight:700,background:sc.bg,color:sc.t,whiteSpace:'nowrap'}},fac.estado||'pendiente'),
+        el('button',{style:{background:'none',border:'1px solid #E2E8F0',borderRadius:'6px',padding:'3px 7px',cursor:'pointer',fontSize:'11px',color:'#475569'},
           onClick:()=>{state.modals.editFactura=fac;render();}},'✏️'),
         el('button',{className:'trash-btn',onClick:()=>{
           if(!confirm('Eliminar factura?'))return;
@@ -3664,122 +4084,143 @@ function renderFacturasTab(c, D, emisores, mesActual) {
           apiPost({action:'delete',sheet:'Facturas',id:fac.id});render();
         },innerHTML:'🗑'})
       );
-      // Ajuste info
-      if(fac.ajuste && Number(fac.ajuste)!==0){
-        row.append(el('span',{style:{fontSize:'10px',color:'#7C3AED',fontWeight:600}},fac.ajuste+'% ajuste'));
-      }
       card.append(row);
     });
     c.append(card);
   });
 }
 
-function renderHonorariosTab(c, D) {
-  if(!state.honFiltros) state.honFiltros = {estado:'todos'};
-  const f = state.honFiltros;
-
-  const filRow = el('div',{style:{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'16px'}});
-  const estadoSel = el('select',{className:'filter-select'});
-  [{v:'todos',l:'Todos'},{v:'pendiente',l:'Pendiente'},{v:'cobrado',l:'Cobrado'}].forEach(s=>{
-    const o=el('option',{value:s.v},s.l);if(f.estado===s.v)o.selected=true;estadoSel.append(o);
+// ─── MODAL: AGREGAR CLIENTE CONFIG ──────────────────────────
+function _mkAutoFrecuenciaBlock(hDat) {
+  const autoChk=el('input',{type:'checkbox',style:{width:'16px',height:'16px',accentColor:'#4F46E5'}});
+  if(hDat.automatico) autoChk.checked=true;
+  const frecSel=el('select',{className:'select',style:{marginBottom:'8px'}});
+  [{v:'mensual',l:'Mensual — cada mes'},{v:'anual',l:'Anual — una vez al año'}].forEach(o=>{
+    const opt=el('option',{value:o.v},o.l);
+    if((hDat.frecuencia||'mensual')===o.v)opt.selected=true;
+    frecSel.append(opt);
   });
-  estadoSel.addEventListener('change',e=>{f.estado=e.target.value;render();});
-  filRow.append(estadoSel);
-  c.append(filRow);
-
-  const honorarios = (D.honorarios||[]).filter(h=>{
-    if(f.estado!=='todos' && h.estado!==f.estado) return false;
-    return true;
-  }).sort((a,b)=>(b.fechaDevengo||'').localeCompare(a.fechaDevengo||''));
-
-  // Totals
-  const pendUYU = honorarios.filter(h=>h.estado!=='cobrado'&&h.moneda!=='USD').reduce((s,h)=>s+Number(h.monto||0),0);
-  const pendUSD = honorarios.filter(h=>h.estado!=='cobrado'&&h.moneda==='USD').reduce((s,h)=>s+Number(h.monto||0),0);
-
-  const sumRow = el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px',marginBottom:'20px'}});
-  const mkSum = (label,val,color)=>{
-    const card=el('div',{style:{background:'#fff',border:'1px solid #E2E8F0',borderRadius:'12px',padding:'16px'}});
-    card.append(el('p',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',margin:'0 0 4px'}},label));
-    card.append(el('p',{style:{fontSize:'20px',fontWeight:800,color,margin:0}},val));
-    return card;
-  };
-  sumRow.append(
-    mkSum('Total',honorarios.length,'#0F172A'),
-    mkSum('Pendiente UYU','$'+Math.round(pendUYU).toLocaleString(),'#DC2626'),
-    mkSum('Pendiente USD','U$S'+Math.round(pendUSD).toLocaleString(),'#DC2626'),
-    mkSum('Cobrados',honorarios.filter(h=>h.estado==='cobrado').length,'#059669')
+  const mesAnualSel=el('select',{className:'select'});
+  ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'].forEach((mn,i)=>{
+    const v=pad2(i+1);const o=el('option',{value:v},mn);
+    if((hDat.mesAnual||pad2(new Date().getMonth()+1))===v)o.selected=true;
+    mesAnualSel.append(o);
+  });
+  const mesAnualWrap=el('div',{style:{marginTop:'6px',display:hDat.frecuencia==='anual'?'block':'none'}},
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Mes en que se genera'),
+    mesAnualSel
   );
-  c.append(sumRow);
-
-  if(!honorarios.length){
-    c.append(el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'40px',textAlign:'center',color:'#94A3B8',fontSize:'14px'}},'Sin honorarios registrados'));
-    return;
-  }
-
-  const card = el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'20px'}});
-  honorarios.forEach(h=>{
-    const cobrado = h.estado==='cobrado';
-    const row = el('div',{style:{display:'flex',alignItems:'center',gap:'10px',padding:'12px 0',borderBottom:'1px solid #F1F5F9',flexWrap:'wrap',opacity:cobrado?'0.6':'1'}});
-    row.append(
-      el('span',{style:{fontSize:'12px',fontFamily:"'DM Mono',monospace",color:'#94A3B8',minWidth:'90px'}},fmt(h.fechaDevengo)||''),
-      el('span',{style:{flex:1,fontSize:'13px',fontWeight:600,color:'#0F172A'}},h.cliente||'Sin cliente'),
-      h.concepto?el('span',{style:{fontSize:'11px',color:'#64748B',flex:1}},h.concepto):'',
-      el('span',{style:{fontSize:'13px',fontWeight:700,color:'#0F172A',whiteSpace:'nowrap'}},(h.moneda==='USD'?'U$S ':'$')+Number(h.monto||0).toLocaleString()),
-      el('button',{
-        style:{padding:'4px 12px',borderRadius:'6px',fontSize:'11px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',
-          background:cobrado?'#F1F5F9':'#DCFCE7',color:cobrado?'#94A3B8':'#166534',border:'none'},
-        onClick:()=>{
-          h.estado=cobrado?'pendiente':'cobrado';
-          h.fechaCobro=cobrado?'':new Date().toISOString().slice(0,10);
-          apiPost({action:'update',sheet:'Honorarios',id:h.id,data:{estado:h.estado,fechaCobro:h.fechaCobro}});render();
-        }
-      }, cobrado?'✓ Cobrado':'Marcar cobrado'),
-      el('button',{style:{background:'none',border:'1px solid #E2E8F0',borderRadius:'6px',padding:'4px 8px',cursor:'pointer',fontSize:'11px'},
-        onClick:()=>{state.modals.editHonorario=h;render();}},'✏️'),
-      el('button',{className:'trash-btn',onClick:()=>{
-        if(!confirm('Eliminar honorario?'))return;
-        D.honorarios=D.honorarios.filter(x=>x.id!==h.id);
-        apiPost({action:'delete',sheet:'Honorarios',id:h.id});render();
-      },innerHTML:'🗑'})
-    );
-    if(cobrado&&h.fechaCobro) row.append(el('span',{style:{fontSize:'10px',color:'#94A3B8'}},fmt(h.fechaCobro)));
-    card.append(row);
-  });
-  c.append(card);
+  frecSel.addEventListener('change',()=>{mesAnualWrap.style.display=frecSel.value==='anual'?'block':'none';});
+  const frecWrap=el('div',{style:{padding:'0 2px 8px'}},
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Frecuencia'),
+    frecSel, mesAnualWrap
+  );
+  const autoRow=el('div',{style:{display:'flex',alignItems:'center',gap:'10px',padding:'12px',background:'#EEF2FF',borderRadius:'10px',cursor:'pointer',marginBottom:'6px'}});
+  autoRow.append(autoChk,el('div',{},
+    el('p',{style:{fontSize:'13px',fontWeight:600,color:'#0F172A',margin:0}},'Generar automáticamente'),
+    el('p',{style:{fontSize:'11px',color:'#64748B',margin:0}},'Se crea sola como emitida al entrar al mes')
+  ));
+  autoRow.addEventListener('click',e=>{if(e.target!==autoChk)autoChk.checked=!autoChk.checked;});
+  return {autoChk, frecSel, mesAnualSel, elements:[autoRow,frecWrap]};
 }
 
-function renderModalAddFactura(c, emisores) {
-  const D = state.data;
-  const f1 = makeFormField('Mes (AAAA-MM)','month','','');
-  const f2 = makeFormField('Cliente','text','','Nombre del cliente');
-  const f3 = makeFormField('Concepto','text','','Descripcion del servicio');
-  const f4 = makeFormField('Monto (sin IVA)','number','','0');
-  
-  const monSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+function renderModalAddHonConfig(c, EMISORES) {
+  const f1 = makeFormField('Nombre del cliente','text','','Empresa o persona');
+  const f2 = makeFormField('Monto mensual','number','','0');
+  const f3 = makeFormField('Fecha último ajuste','date',new Date().toISOString().slice(0,10),'');
+  const f4 = makeFormField('Notas','text','','Opcional');
+  const monSel=el('select',{className:'select',style:{marginBottom:'12px'}});
   [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);monSel.append(o);});
-  
-  const emisorSel = el('select',{className:'select',style:{marginBottom:'12px'}});
-  emisores.forEach(em=>{const o=el('option',{value:em},em);emisorSel.append(o);});
+  const emisorSel=el('select',{className:'select',style:{marginBottom:'12px'}});
+  EMISORES.forEach(em=>{const o=el('option',{value:em},em);emisorSel.append(o);});
+  const {autoChk,frecSel,mesAnualSel,elements}=_mkAutoFrecuenciaBlock({});
+  const saveBtn=el('button',{className:'btn btn-primary',onClick:()=>{
+    const nombre=f1.querySelector('input').value.trim();
+    const monto=Number(f2.querySelector('input').value)||0;
+    if(!nombre||!monto) return alert('Nombre y monto son obligatorios');
+    const h={id:'hc'+Date.now(),empresaNombre:nombre,cliente:nombre,monto,moneda:monSel.value,
+      emisor:emisorSel.value,fechaUltimoAjuste:f3.querySelector('input').value,
+      notas:f4.querySelector('input').value.trim(),automatico:autoChk.checked,
+      frecuencia:frecSel.value,mesAnual:frecSel.value==='anual'?mesAnualSel.value:null,
+      fechaCreacion:new Date().toISOString().slice(0,10)};
+    if(!state.data.honorariosConfig) state.data.honorariosConfig=[];
+    state.data.honorariosConfig.push(h);
+    apiPost({action:'add',sheet:'HonorariosConfig',data:h});
+    state.modals.addHonConfig=false;render();
+  }},'💾 Guardar');
+  makeModal('Nuevo cliente',[
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Emisor'),
+    emisorSel, f1, f2,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
+    monSel, f3, f4, ...elements, saveBtn
+  ], c);
+}
 
-  const ajustInp = makeFormField('Ajuste %','number','0','0 = sin ajuste');
-  
-  const estadoSel = el('select',{className:'select',style:{marginBottom:'12px'}});
+// ─── MODAL: EDITAR CLIENTE CONFIG ───────────────────────────
+function renderModalEditHonConfig(c, EMISORES) {
+  const h = state.modals.editHonConfig;
+  const f1=makeFormField('Nombre del cliente','text',h.empresaNombre||h.cliente||'','');
+  const f2=makeFormField('Monto mensual','number',h.monto||0,'');
+  const f3=makeFormField('Fecha último ajuste','date',h.fechaUltimoAjuste||new Date().toISOString().slice(0,10),'');
+  const f4=makeFormField('Notas','text',h.notas||'','');
+  const monSel=el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);if(h.moneda===m.v)o.selected=true;monSel.append(o);});
+  const emisorSel=el('select',{className:'select',style:{marginBottom:'12px'}});
+  EMISORES.forEach(em=>{const o=el('option',{value:em},em);if(h.emisor===em)o.selected=true;emisorSel.append(o);});
+  const {autoChk,frecSel,mesAnualSel,elements}=_mkAutoFrecuenciaBlock(h);
+  const saveBtn=el('button',{className:'btn btn-primary',onClick:()=>{
+    const nombre=f1.querySelector('input').value.trim();
+    const monto=Number(f2.querySelector('input').value)||0;
+    if(!nombre||!monto) return alert('Nombre y monto son obligatorios');
+    Object.assign(h,{empresaNombre:nombre,cliente:nombre,monto,moneda:monSel.value,
+      emisor:emisorSel.value,fechaUltimoAjuste:f3.querySelector('input').value,
+      notas:f4.querySelector('input').value.trim(),automatico:autoChk.checked,
+      frecuencia:frecSel.value,mesAnual:frecSel.value==='anual'?mesAnualSel.value:null});
+    apiPost({action:'update',sheet:'HonorariosConfig',id:h.id,data:h});
+    state.modals.editHonConfig=null;render();
+  }},'💾 Guardar');
+  makeModal('Editar cliente',[
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Emisor'),
+    emisorSel, f1, f2,
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
+    monSel, f3, f4, ...elements, saveBtn
+  ], c);
+}
+
+// ─── MODAL: AGREGAR FACTURA ──────────────────────────────────
+function renderModalAddFactura(c, EMISORES) {
+  const D = state.data;
+  const pre = (state.modals.addFactura && state.modals.addFactura._prefill) || {};
+
+  const f1=makeFormField('Mes (AAAA-MM)','month',pre.mes||'','');
+  const f2=makeFormField('Cliente','text',pre.cliente||'','Nombre del cliente');
+  const f3=makeFormField('Concepto','text',pre.concepto||'','Descripción');
+  const f4=makeFormField('Monto (sin IVA)','number',pre.monto||'','0');
+  const f5=makeFormField('Ajuste %','number','0','0 = sin ajuste');
+
+  const monSel=el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);if(pre.moneda===m.v)o.selected=true;monSel.append(o);});
+
+  const emisorSel=el('select',{className:'select',style:{marginBottom:'12px'}});
+  EMISORES.forEach(em=>{const o=el('option',{value:em},em);if(pre.emisor===em)o.selected=true;emisorSel.append(o);});
+
+  const estadoSel=el('select',{className:'select',style:{marginBottom:'12px'}});
   [{v:'pendiente',l:'Pendiente'},{v:'emitida',l:'Emitida'},{v:'cobrada',l:'Cobrada'}].forEach(s=>{const o=el('option',{value:s.v},s.l);estadoSel.append(o);});
 
-  const saveBtn = el('button',{className:'btn btn-primary',onClick:()=>{
-    const mes = f1.querySelector('input').value;
-    const cliente = f2.querySelector('input').value.trim();
-    const concepto = f3.querySelector('input').value.trim();
-    const monto = Number(f4.querySelector('input').value)||0;
-    const moneda = monSel.value;
-    const emisor = emisorSel.value;
-    const ajuste = Number(ajustInp.querySelector('input').value)||0;
-    const estado = estadoSel.value;
-    const iva = moneda==='UYU' ? Math.round(monto*0.22*100)/100 : 0;
-    const montoAjustado = ajuste ? Math.round(monto*(1+ajuste/100)) : monto;
-    const total = Math.round((montoAjustado + iva)*100)/100;
+  const saveBtn=el('button',{className:'btn btn-primary',onClick:()=>{
+    const mes=f1.querySelector('input').value;
+    const cliente=f2.querySelector('input').value.trim();
+    const concepto=f3.querySelector('input').value.trim();
+    const monto=Number(f4.querySelector('input').value)||0;
+    const ajuste=Number(f5.querySelector('input').value)||0;
+    const moneda=monSel.value;
+    const emisor=emisorSel.value;
+    const estado=estadoSel.value;
     if(!mes||!cliente) return alert('Mes y cliente son obligatorios');
-    const fac = {id:'fac'+Date.now(),mes,cliente,concepto,monto,montoAjustado,iva,total,moneda,emisor,ajuste,estado,fechaCreacion:new Date().toISOString().slice(0,10)};
+    const iva=moneda==='UYU'?Math.round(monto*0.22*100)/100:0;
+    const montoAjustado=ajuste?Math.round(monto*(1+ajuste/100)):monto;
+    const total=Math.round((montoAjustado+iva)*100)/100;
+    const fac={id:'fac'+Date.now(),mes,cliente,concepto,monto,montoAjustado,iva,total,moneda,emisor,ajuste,estado,fechaCreacion:new Date().toISOString().slice(0,10),fechaCobro:''};
     D.facturas.push(fac);
     apiPost({action:'add',sheet:'Facturas',data:fac});
     state.modals.addFactura=false;render();
@@ -3787,56 +4228,7 @@ function renderModalAddFactura(c, emisores) {
 
   makeModal('Nueva Factura',[
     el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Emisor'),
-    emisorSel,
-    f1,f2,f3,f4,
-    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
-    monSel,
-    ajustInp,
-    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Estado'),
-    estadoSel,
-    saveBtn
-  ], c);
-}
-
-function renderModalEditFactura(c, emisores) {
-  const fac = state.modals.editFactura;
-  const D = state.data;
-
-  const f1 = makeFormField('Mes','month',fac.mes||'','');
-  const f2 = makeFormField('Cliente','text',fac.cliente||'','Nombre');
-  const f3 = makeFormField('Concepto','text',fac.concepto||'','');
-  const f4 = makeFormField('Monto (sin IVA)','number',fac.monto||0,'0');
-  const f5 = makeFormField('Ajuste %','number',fac.ajuste||0,'0');
-
-  const monSel = el('select',{className:'select',style:{marginBottom:'12px'}});
-  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);if(fac.moneda===m.v)o.selected=true;monSel.append(o);});
-
-  const emisorSel = el('select',{className:'select',style:{marginBottom:'12px'}});
-  emisores.forEach(em=>{const o=el('option',{value:em},em);if(fac.emisor===em)o.selected=true;emisorSel.append(o);});
-
-  const estadoSel = el('select',{className:'select',style:{marginBottom:'12px'}});
-  [{v:'pendiente',l:'Pendiente'},{v:'emitida',l:'Emitida'},{v:'cobrada',l:'Cobrada'}].forEach(s=>{const o=el('option',{value:s.v},s.l);if(fac.estado===s.v)o.selected=true;estadoSel.append(o);});
-
-  const saveBtn = el('button',{className:'btn btn-primary',onClick:()=>{
-    const mes = f1.querySelector('input').value;
-    const cliente = f2.querySelector('input').value.trim();
-    const concepto = f3.querySelector('input').value.trim();
-    const monto = Number(f4.querySelector('input').value)||0;
-    const ajuste = Number(f5.querySelector('input').value)||0;
-    const moneda = monSel.value;
-    const emisor = emisorSel.value;
-    const estado = estadoSel.value;
-    const iva = moneda==='UYU' ? Math.round(monto*0.22*100)/100 : 0;
-    const montoAjustado = ajuste ? Math.round(monto*(1+ajuste/100)) : monto;
-    const total = Math.round((montoAjustado + iva)*100)/100;
-    Object.assign(fac,{mes,cliente,concepto,monto,montoAjustado,iva,total,moneda,emisor,ajuste,estado});
-    apiPost({action:'update',sheet:'Facturas',id:fac.id,data:fac});
-    state.modals.editFactura=null;render();
-  }},'💾 Guardar');
-
-  makeModal('Editar Factura',[
-    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Emisor'),
-    emisorSel, f1, f2, f3, f4,
+    emisorSel, f1,f2,f3,f4,
     el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
     monSel, f5,
     el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Estado'),
@@ -3844,73 +4236,55 @@ function renderModalEditFactura(c, emisores) {
   ], c);
 }
 
-function renderModalAddHonorario(c) {
-  const D = state.data;
-  const f1 = makeFormField('Cliente','text','','Nombre del cliente');
-  const f2 = makeFormField('Concepto','text','','Descripcion');
-  const f3 = makeFormField('Monto','number','','0');
-  const f4 = makeFormField('Fecha devengo','date',new Date().toISOString().slice(0,10),'');
+// ─── MODAL: EDITAR FACTURA ───────────────────────────────────
+function renderModalEditFactura(c, EMISORES) {
+  const fac=state.modals.editFactura;
+  const D=state.data;
+  const f1=makeFormField('Mes','month',fac.mes||'','');
+  const f2=makeFormField('Cliente','text',fac.cliente||'','');
+  const f3=makeFormField('Concepto','text',fac.concepto||'','');
+  const f4=makeFormField('Monto (sin IVA)','number',fac.monto||0,'');
+  const f5=makeFormField('Ajuste %','number',fac.ajuste||0,'');
+  const f6=makeFormField('Fecha cobro','date',fac.fechaCobro||'','');
 
-  const monSel = el('select',{className:'select',style:{marginBottom:'12px'}});
-  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);monSel.append(o);});
+  const monSel=el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);if((fac.moneda||'').trim()===m.v)o.selected=true;monSel.append(o);});
 
-  const frec = el('select',{className:'select',style:{marginBottom:'12px'}});
-  [{v:'unico',l:'Único'},{v:'mensual',l:'Mensual recurrente'}].forEach(s=>{const o=el('option',{value:s.v},s.l);frec.append(o);});
+  const emisorSel=el('select',{className:'select',style:{marginBottom:'12px'}});
+  EMISORES.forEach(em=>{const o=el('option',{value:em},em);if(fac.emisor===em)o.selected=true;emisorSel.append(o);});
 
-  const saveBtn = el('button',{className:'btn btn-primary',onClick:()=>{
-    const cliente = f1.querySelector('input').value.trim();
-    const concepto = f2.querySelector('input').value.trim();
-    const monto = Number(f3.querySelector('input').value)||0;
-    const fechaDevengo = f4.querySelector('input').value;
-    if(!cliente||!monto) return alert('Cliente y monto son obligatorios');
-    const hon = {id:'hon'+Date.now(),cliente,concepto,monto,moneda:monSel.value,frecuencia:frec.value,fechaDevengo,estado:'pendiente',fechaCobro:''};
-    D.honorarios.push(hon);
-    apiPost({action:'add',sheet:'Honorarios',data:hon});
-    state.modals.addHonorario=false;render();
-  }},'💾 Guardar');
+  const estadoSel=el('select',{className:'select',style:{marginBottom:'12px'}});
+  [{v:'pendiente',l:'Pendiente'},{v:'emitida',l:'Emitida'},{v:'cobrada',l:'Cobrada'}].forEach(s=>{const o=el('option',{value:s.v},s.l);if(fac.estado===s.v)o.selected=true;estadoSel.append(o);});
 
-  makeModal('Nuevo Honorario',[f1,f2,f3,
-    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
-    monSel,
-    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Frecuencia'),
-    frec, f4, saveBtn
-  ], c);
-}
-
-function renderModalEditHonorario(c) {
-  const h = state.modals.editHonorario;
-  const D = state.data;
-  const f1 = makeFormField('Cliente','text',h.cliente||'','');
-  const f2 = makeFormField('Concepto','text',h.concepto||'','');
-  const f3 = makeFormField('Monto','number',h.monto||0,'');
-  const f4 = makeFormField('Fecha devengo','date',h.fechaDevengo||'','');
-
-  const monSel = el('select',{className:'select',style:{marginBottom:'12px'}});
-  [{v:'UYU',l:'Pesos UYU'},{v:'USD',l:'Dólares USD'}].forEach(m=>{const o=el('option',{value:m.v},m.l);if(h.moneda===m.v)o.selected=true;monSel.append(o);});
-
-  const estadoSel = el('select',{className:'select',style:{marginBottom:'12px'}});
-  [{v:'pendiente',l:'Pendiente'},{v:'cobrado',l:'Cobrado'}].forEach(s=>{const o=el('option',{value:s.v},s.l);if(h.estado===s.v)o.selected=true;estadoSel.append(o);});
-
-  const saveBtn = el('button',{className:'btn btn-primary',onClick:()=>{
-    Object.assign(h,{
-      cliente:f1.querySelector('input').value.trim(),
-      concepto:f2.querySelector('input').value.trim(),
-      monto:Number(f3.querySelector('input').value)||0,
-      fechaDevengo:f4.querySelector('input').value,
-      moneda:monSel.value,
-      estado:estadoSel.value
+  const saveBtn=el('button',{className:'btn btn-primary',onClick:()=>{
+    const monto=Number(f4.querySelector('input').value)||0;
+    const ajuste=Number(f5.querySelector('input').value)||0;
+    const moneda=monSel.value;
+    const iva=moneda==='UYU'?Math.round(monto*0.22*100)/100:0;
+    const montoAjustado=ajuste?Math.round(monto*(1+ajuste/100)):monto;
+    const total=Math.round((montoAjustado+iva)*100)/100;
+    Object.assign(fac,{
+      mes:f1.querySelector('input').value,
+      cliente:f2.querySelector('input').value.trim(),
+      concepto:f3.querySelector('input').value.trim(),
+      monto,montoAjustado,iva,total,ajuste,
+      moneda:monSel.value, emisor:emisorSel.value, estado:estadoSel.value,
+      fechaCobro:f6.querySelector('input').value
     });
-    apiPost({action:'update',sheet:'Honorarios',id:h.id,data:h});
-    state.modals.editHonorario=null;render();
+    apiPost({action:'update',sheet:'Facturas',id:fac.id,data:fac});
+    state.modals.editFactura=null;render();
   }},'💾 Guardar');
 
-  makeModal('Editar Honorario',[f1,f2,f3,
+  makeModal('Editar Factura',[
+    el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Emisor'),
+    emisorSel, f1,f2,f3,f4,
     el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Moneda'),
-    monSel,
+    monSel, f5,
     el('label',{style:{fontSize:'11px',fontWeight:700,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},'Estado'),
-    estadoSel, f4, saveBtn
+    estadoSel, f6, saveBtn
   ], c);
 }
+
 
 // INIT
 if(state.apiUrl && state.accessCode) {
