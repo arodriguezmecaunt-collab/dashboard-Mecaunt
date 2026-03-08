@@ -3672,6 +3672,7 @@ function renderFacControl(c, D, EMISORES) {
   c.append(row);
 
   const mesKey = f.anio+'-'+f.mes; // e.g. "2026-03"
+  const config = getHonConfig().filter(h=> f.emisor==='todos' || h.emisor===f.emisor);
 
   // Auto-generar facturas para clientes automáticos que no tienen factura este mes
   {
@@ -3699,7 +3700,6 @@ function renderFacControl(c, D, EMISORES) {
       }
     });
   }
-  const config = getHonConfig().filter(h=> f.emisor==='todos' || h.emisor===f.emisor);
   const facturasMes = getFacturasMes(mesKey);
 
   // Para cada cliente en config, buscar si tiene factura en ese mes
