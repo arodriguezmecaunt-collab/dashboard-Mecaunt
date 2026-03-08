@@ -3617,11 +3617,19 @@ function renderFacturacion(c) {
     return;
   }
 
-  if(state.facTab==='control')    renderFacControl(c, D, EMISORES);
-  else if(state.facTab==='pendientes') renderFacPendientes(c, D);
-  else if(state.facTab==='ajustes')   renderFacAjustes(c, D, EMISORES);
-  else if(state.facTab==='config')    renderFacConfig(c, D, EMISORES);
-  else if(state.facTab==='facturas')  renderFacHistorial(c, D, EMISORES);
+  try {
+    if(state.facTab==='control')    renderFacControl(c, D, EMISORES);
+    else if(state.facTab==='pendientes') renderFacPendientes(c, D);
+    else if(state.facTab==='ajustes')   renderFacAjustes(c, D, EMISORES);
+    else if(state.facTab==='config')    renderFacConfig(c, D, EMISORES);
+    else if(state.facTab==='facturas')  renderFacHistorial(c, D, EMISORES);
+  } catch(renderErr) {
+    c.append(el('div',{style:{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:'14px',padding:'24px',marginTop:'8px'}},
+      el('p',{style:{color:'#DC2626',fontWeight:700,marginBottom:'8px'}},'❌ Error al renderizar tab: '+state.facTab),
+      el('p',{style:{color:'#7F1D1D',fontSize:'12px',fontFamily:"'DM Mono',monospace",wordBreak:'break-all'}},renderErr.message),
+      el('p',{style:{color:'#7F1D1D',fontSize:'11px',fontFamily:"'DM Mono',monospace",wordBreak:'break-all',marginTop:'6px',opacity:'0.7'}},renderErr.stack||'')
+    ));
+  }
 
   // Modals
   if(state.modals.addHonConfig)  renderModalAddHonConfig(c, EMISORES);
