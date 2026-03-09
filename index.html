@@ -622,8 +622,8 @@ function render() {
 
   // Restore focus
   if(focusId) {
-    const el = document.querySelector('[data-fid="'+focusId+'"]');
-    if(el) { el.focus(); if(cursorPos !== undefined) try { el.setSelectionRange(cursorPos, cursorPos); } catch(e){} }
+    const focusEl = document.querySelector('[data-fid="'+focusId+'"]');
+    if(focusEl) { focusEl.focus(); if(cursorPos !== undefined) try { focusEl.setSelectionRange(cursorPos, cursorPos); } catch(e){} }
   }
 }
 
