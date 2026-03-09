@@ -304,58 +304,30 @@ async function apiPost(payload) {
   try {
     lastWriteTime = Date.now();
     payload._code = state.accessCode;
-    const body = JSON.stringify(payload);
-    // Use POST to avoid URL length limits (GET breaks with large payloads like Facturas)
+    const encoded = encodeURIComponent(JSON.stringify(payload));
+    const url = state.apiUrl + '?write=1&payload=' + encoded;
+    const resp = await fetch(url, {method:'GET', redirect:'follow'});
+    const text = await resp.text();
     try {
-      const resp = await fetch(state.apiUrl, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body,
-        redirect:'follow'
-      });
-      const text = await resp.text();
       const result = JSON.parse(text);
       if(result.error) {
         console.error('apiPost error:', result.error, payload);
-        state.error = '❌ Error guardando en '+( payload.sheet||'?')+': '+result.error;
+        state.error = '❌ '+( payload.sheet||'?')+': '+result.error;
         render();
       } else {
-        console.log('apiPost OK:', payload.action, payload.sheet, payload.id||payload.data?.id||'');
+        console.log('apiPost OK:', payload.action, payload.sheet, result);
       }
-    } catch(postErr) {
-      // Fallback to GET if POST blocked (embedded mode)
-      const encoded = encodeURIComponent(body);
-      const url = state.apiUrl + '?write=1&payload=' + encoded;
-      const resp2 = await fetch(url, {method:'GET', redirect:'follow'});
-      try {
-        const text2 = await resp2.text();
-        const result2 = JSON.parse(text2);
-        if(result2.error) { state.error = 'Error: '+result2.error; render(); }
-      } catch(e) { /* OK */ }
-    }
+    } catch(e) { /* non-JSON response, ignore */ }
   } catch(e) { state.error = 'Error sync: '+e.message; render(); }
 }
 
-// Guarda factura: intenta update; si el backend dice "no encontrado", hace add
+// Para facturas: update con solo los campos esenciales para no superar límite de URL
 async function upsertFactura(fac) {
-  if(!state.apiUrl) return;
-  const res = await new Promise(async resolve => {
-    try {
-      fac._code = state.accessCode;
-      const body = JSON.stringify({action:'update', sheet:'Facturas', id:fac.id, data:fac, _code:state.accessCode});
-      const resp = await fetch(state.apiUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body, redirect:'follow'});
-      const text = await resp.text();
-      resolve(JSON.parse(text));
-    } catch(e) { resolve({error: e.message}); }
-  });
-  if(res.error && res.error.includes('no encontrado')) {
-    // Row doesn't exist yet — add it
-    await apiPost({action:'add', sheet:'Facturas', data:fac});
-  } else if(res.error) {
-    state.error = '❌ Error guardando factura: ' + res.error; render();
-  }
+  // Primero actualizar en memoria ya está hecho por el caller
+  // Intentar update con campos mínimos
+  const minimal = {id:fac.id, estado:fac.estado, fechaCobro:fac.fechaCobro||'', mes:fac.mes, cliente:fac.cliente, emisor:fac.emisor, total:fac.total, monto:fac.monto, montoAjustado:fac.montoAjustado, iva:fac.iva, moneda:fac.moneda, concepto:fac.concepto, ajuste:fac.ajuste||0, automatico:fac.automatico||false, fechaCreacion:fac.fechaCreacion||''};
+  await apiPost({action:'update', sheet:'Facturas', id:fac.id, data:minimal});
 }
-
 const flatEmp = e => ({id:e.id,nombre:e.nombre,rut:e.rut||'',categoria:e.categoria||'',categoria2:e.categoria2||'',clave_bps:e.claves?.bps||'',clave_dgi:e.claves?.dgi||'',clave_anv:e.claves?.anv||'',notas:e.notas||'',fecha_bce:e.fecha_bce||'',carpeta:e.carpeta||''});
 
 const defaultCats = [
