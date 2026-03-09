@@ -258,6 +258,45 @@ async function autoGenerate(year, month) {
   })();
 }
 
+// Auto-genera facturas solo para clientes con automatico=true, solo mes actual
+// Se llama UNA SOLA VEZ al cargar datos, no en cada render
+function autoGenerarFacturasAuto() {
+  const hoy = new Date();
+  const mesKey = hoy.getFullYear()+'-'+pad2(hoy.getMonth()+1);
+  const config = getHonConfig();
+  const nuevas = [];
+  config.forEach(h=>{
+    if(!h.automatico) return;
+    const mesMes = mesKey.slice(5,7);
+    if((h.frecuencia||'mensual')==='anual' && (h.mesAnual||'01')!==mesMes) return;
+    const yaExiste = (state.data.facturas||[]).find(fac=>
+      (fac.mes||'').trim()===mesKey &&
+      (fac.cliente||'').trim().toLowerCase()===(h.empresaNombre||h.cliente||'').trim().toLowerCase() &&
+      (fac.estado||'').trim()!=='saldo_inicial'
+    );
+    if(yaExiste) return;
+    const monto=Number(h.monto||0);
+    const moneda=(h.moneda||'UYU').trim();
+    const iva=moneda==='UYU'?Math.round(monto*0.22):0;
+    const total=monto+iva;
+    const fac={id:'fac'+Date.now()+Math.round(Math.random()*9999),mes:mesKey,
+      cliente:h.empresaNombre||h.cliente||'',concepto:'Honorarios '+facMesLabel(mesKey),
+      monto,montoAjustado:monto,iva,total,moneda,emisor:h.emisor||'',
+      ajuste:0,estado:'emitida',automatico:true,
+      fechaCreacion:hoy.toISOString().slice(0,10),fechaCobro:''};
+    nuevas.push(fac);
+    state.data.facturas = state.data.facturas||[];
+    state.data.facturas.push(fac);
+  });
+  if(!nuevas.length) return;
+  // Guardar en background
+  (async()=>{
+    for(const fac of nuevas) {
+      await apiPost({action:'add',sheet:'Facturas',data:fac});
+    }
+  })();
+}
+
 let lastWriteTime = 0;
 
 async function apiPost(payload) {
@@ -295,6 +334,26 @@ async function apiPost(payload) {
       } catch(e) { /* OK */ }
     }
   } catch(e) { state.error = 'Error sync: '+e.message; render(); }
+}
+
+// Guarda factura: intenta update; si el backend dice "no encontrado", hace add
+async function upsertFactura(fac) {
+  if(!state.apiUrl) return;
+  const res = await new Promise(async resolve => {
+    try {
+      fac._code = state.accessCode;
+      const body = JSON.stringify({action:'update', sheet:'Facturas', id:fac.id, data:fac, _code:state.accessCode});
+      const resp = await fetch(state.apiUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body, redirect:'follow'});
+      const text = await resp.text();
+      resolve(JSON.parse(text));
+    } catch(e) { resolve({error: e.message}); }
+  });
+  if(res.error && res.error.includes('no encontrado')) {
+    // Row doesn't exist yet — add it
+    await apiPost({action:'add', sheet:'Facturas', data:fac});
+  } else if(res.error) {
+    state.error = '❌ Error guardando factura: ' + res.error; render();
+  }
 }
 
 const flatEmp = e => ({id:e.id,nombre:e.nombre,rut:e.rut||'',categoria:e.categoria||'',categoria2:e.categoria2||'',clave_bps:e.claves?.bps||'',clave_dgi:e.claves?.dgi||'',clave_anv:e.claves?.anv||'',notas:e.notas||'',fecha_bce:e.fecha_bce||'',carpeta:e.carpeta||''});
@@ -350,9 +409,11 @@ async function connect(url, code) {
     localStorage.setItem('estudio-access-code', state.accessCode);
     localStorage.setItem('estudio-access-name', state.accessName);
     state.lastSync = new Date(); state.modals = {};
-    // Auto-generate current month on login
+    // Auto-generate vencimientos for current month on login
     const now = new Date();
     autoGenerate(now.getFullYear(), now.getMonth()+1);
+    // Auto-genera facturas para clientes automáticos (solo una vez al cargar)
+    autoGenerarFacturasAuto();
     // Si el Apps Script es viejo y no devuelve licencias, las buscamos por separado
     if(!d.licencias || d.licencias.length === 0) fetchLicenciasSheets();
   } catch(e) { state.error = 'Error: '+e.message; }
@@ -3708,34 +3769,7 @@ function renderFacControl(c, D, EMISORES) {
   const mesKey = f.anio+'-'+f.mes; // e.g. "2026-03"
   const config = getHonConfig().filter(h=> f.emisor==='todos' || h.emisor===f.emisor);
 
-  // Auto-generar facturas para clientes automáticos que no tienen factura este mes
-  // Solo para mes actual o futuro — nunca para meses pasados
-  {
-    const hoyKey = new Date().getFullYear()+'-'+pad2(new Date().getMonth()+1);
-    if(mesKey >= hoyKey) config.forEach(h=>{
-      if(!h.automatico) return;
-      // Chequear frecuencia
-      const mesMes = mesKey.slice(5,7);
-      if((h.frecuencia||'mensual')==='anual' && (h.mesAnual||'01')!==mesMes) return;
-      const yaExiste = (state.data.facturas||[]).find(fac=>
-        (fac.mes||'').trim()===mesKey &&
-        (fac.cliente||'').trim().toLowerCase()===(h.empresaNombre||h.cliente||'').trim().toLowerCase()
-      );
-      if(!yaExiste){
-        const monto=Number(h.monto||0);
-        const moneda=(h.moneda||'UYU').trim();
-        const iva=moneda==='UYU'?Math.round(monto*0.22):0;
-        const total=monto+iva;
-        const fac={id:'fac'+Date.now()+Math.round(Math.random()*9999),mes:mesKey,
-          cliente:h.empresaNombre||h.cliente||'',concepto:'Honorarios '+facMesLabel(mesKey),
-          monto,montoAjustado:monto,iva,total,moneda,emisor:h.emisor||'',
-          ajuste:0,estado:'emitida',automatico:true,
-          fechaCreacion:new Date().toISOString().slice(0,10),fechaCobro:''};
-        state.data.facturas.push(fac);
-        apiPost({action:'add',sheet:'Facturas',data:fac});
-      }
-    });
-  }
+  // [auto-gen movida a autoGenerarFacturas()]
   const facturasMes = getFacturasMes(mesKey);
 
 
@@ -3747,9 +3781,14 @@ function renderFacControl(c, D, EMISORES) {
       const hon = (h.empresaNombre||h.cliente||'').trim().toUpperCase();
       return cli===hon || cli.includes(hon.slice(0,10)) || hon.includes(cli.slice(0,10));
     });
-    if(!factura) pendientes.push({...h, _estado:'pendiente'});
-    else if((factura.estado||'').trim()==='cobrada') cobrados.push({...h, _estado:'cobrada', _factura:factura});
-    else facturados.push({...h, _estado:'emitida', _factura:factura});
+    if(!factura || (factura.estado||'').trim()==='pendiente') {
+      pendientes.push({...h, _estado:'pendiente', _factura:factura||null});
+    } else if((factura.estado||'').trim()==='cobrada') {
+      cobrados.push({...h, _estado:'cobrada', _factura:factura});
+    } else {
+      // emitida u otro estado no-cobrado
+      facturados.push({...h, _estado:'emitida', _factura:factura});
+    }
   });
 
   // Resumen cards
@@ -3820,14 +3859,14 @@ function renderFacControl(c, D, EMISORES) {
                 ajuste:0,estado:'emitida',automatico:false,
                 fechaCreacion:new Date().toISOString().slice(0,10),fechaCobro:''};
               state.data.facturas.push(fac);
-              apiPost({action:'add',sheet:'Facturas',data:fac});
+              upsertFactura(fac);
               render();
             }
           },'✅ Emitida'));
         } else if(h._estado==='emitida'){
           row.append(
             el('button',{style:{padding:'4px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:700,cursor:'pointer',background:'#059669',color:'#fff',border:'none'},
-              onClick:()=>{const factura=h._factura;factura.estado='cobrada';factura.fechaCobro=new Date().toISOString().slice(0,10);apiPost({action:'update',sheet:'Facturas',id:factura.id,data:factura});render();}
+              onClick:()=>{const factura=h._factura;factura.estado='cobrada';factura.fechaCobro=new Date().toISOString().slice(0,10);upsertFactura(factura);render();}
             },'✅ Cobrada'),
             el('button',{style:{padding:'4px 8px',borderRadius:'6px',fontSize:'11px',cursor:'pointer',background:'#F1F5F9',border:'1px solid #E2E8F0',color:'#475569'},
               onClick:()=>{state.modals.editFactura=h._factura;render();}
@@ -3958,7 +3997,7 @@ function renderFacPendientes(c, D) {
         el('span',{style:{flex:1,fontSize:'12px',color:'#475569'}},f.concepto||'Saldo inicial'),
         el('span',{style:{fontWeight:700,fontSize:'13px',whiteSpace:'nowrap',color:'#7C3AED'}},(moneda==='USD'?'U$S ':'$')+Number(f.total||0).toLocaleString()),
         el('button',{style:{padding:'3px 8px',borderRadius:'5px',fontSize:'11px',fontWeight:700,cursor:'pointer',background:'#059669',color:'#fff',border:'none'},
-          onClick:()=>{ f.estado='cobrada'; f.fechaCobro=new Date().toISOString().slice(0,10); apiPost({action:'update',sheet:'Facturas',id:f.id,data:f}); render(); }
+          onClick:()=>{ f.estado='cobrada'; f.fechaCobro=new Date().toISOString().slice(0,10); upsertFactura(f); render(); }
         },'✅ Cobrado'),
         el('button',{className:'trash-btn',innerHTML:'🗑',onClick:()=>{ if(!confirm('¿Eliminar saldo inicial?'))return; D.facturas=D.facturas.filter(x=>x.id!==f.id); apiPost({action:'delete',sheet:'Facturas',id:f.id}); render(); }})
       );
@@ -3974,7 +4013,7 @@ function renderFacPendientes(c, D) {
         el('span',{style:{flex:1,fontSize:'12px',color:'#475569'}},f.concepto||'Honorarios'),
         el('span',{style:{fontWeight:700,fontSize:'13px',whiteSpace:'nowrap'}},(moneda==='USD'?'U$S ':'$')+Number(f.total||0).toLocaleString()),
         el('button',{style:{padding:'3px 8px',borderRadius:'5px',fontSize:'11px',fontWeight:700,cursor:'pointer',background:'#059669',color:'#fff',border:'none'},
-          onClick:()=>{ f.estado='cobrada'; f.fechaCobro=new Date().toISOString().slice(0,10); apiPost({action:'update',sheet:'Facturas',id:f.id,data:f}); render(); }
+          onClick:()=>{ f.estado='cobrada'; f.fechaCobro=new Date().toISOString().slice(0,10); upsertFactura(f); render(); }
         },'✅ Cobrado'),
         el('button',{style:{padding:'3px 8px',borderRadius:'5px',fontSize:'11px',cursor:'pointer',background:'#F1F5F9',border:'1px solid #E2E8F0',color:'#475569'},
           onClick:()=>{state.modals.editFactura=f;render();}},'✏️')
@@ -4378,7 +4417,7 @@ function renderModalEditFactura(c, EMISORES) {
       moneda:monSel.value, emisor:emisorSel.value, estado:estadoSel.value,
       fechaCobro:f6.querySelector('input').value
     });
-    apiPost({action:'update',sheet:'Facturas',id:fac.id,data:fac});
+    upsertFactura(fac);
     state.modals.editFactura=null;render();
   }},'💾 Guardar');
 
