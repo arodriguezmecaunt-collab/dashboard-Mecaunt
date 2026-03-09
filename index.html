@@ -506,9 +506,9 @@ async function silentRefresh() {
       const newAus = (d.ausencias||[]).filter(a=>!oldAusIds.has(a.id));
       newAus.forEach(a=>showNotif('Ausencia: <b>'+a.nombre+'</b> - '+a.motivo));
     }
-    state.data = d; state.lastSync = new Date(); state.error = '';
+    state.data = d; state.lastSync = new Date(); state.error = ''; state.syncError = null;
     render();
-  } catch(e) { /* silent fail */ }
+  } catch(e) { state.syncError = new Date(); render(); }
 }
 
 // Excel export
@@ -581,7 +581,7 @@ function render() {
     ),
     el('div',{style:{padding:'0 10px 10px'}},
       el('button',{onClick:refresh,style:{width:'100%',padding:'10px',background:'#1E293B',border:'1px solid #334155',borderRadius:'10px',color:state.syncing?'#818CF8':'#94A3B8',fontSize:'12px',fontWeight:600,cursor:'pointer',fontFamily:"'DM Sans',sans-serif",display:'flex',alignItems:'center',justifyContent:'center',gap:'6px'}},
-        state.syncing?'\u23f3 Sincronizando...':'\u21bb Actualizar'+(state.lastSync?' ('+state.lastSync.toLocaleTimeString().slice(0,5)+')':''))
+        state.syncing?'\u23f3 Sincronizando...':state.syncError?'⚠️ Sin sync ('+(state.syncError.toLocaleTimeString().slice(0,5))+')':'\u21bb Actualizar'+(state.lastSync?' ('+state.lastSync.toLocaleTimeString().slice(0,5)+')':''))
     ),
     el('nav',{style:{flex:1,padding:'0 10px'}},
       ...navItems.map(n=>el('button',{className:'nav-btn'+(state.section===n.id?' active':''),onClick:()=>{state.section=n.id;state.search='';closeSidebar();render()}},n.icon+' '+n.label))
