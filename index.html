@@ -212,9 +212,9 @@ async function autoGenerate(year, month) {
     const fechaVenc = prefix+'-'+pad2(dia);
     // Chequear si ya existe un vencimiento para esta plantilla en este mes
     const yaExiste = existing.some(v =>
-      v.empresaId === p.empresaId &&
-      v.org === p.org &&
-      (v.obligacion||'').trim() === (p.obligacion||'').trim() &&
+      String(v.empresaId) === String(p.empresaId) &&
+      String(v.org) === String(p.org) &&
+      (v.obligacion||'').trim().toUpperCase() === (p.obligacion||'').trim().toUpperCase() &&
       (v.venc||'').startsWith(prefix)
     );
     if(yaExiste) return;
@@ -2338,12 +2338,19 @@ function renderModalPlantilla(app) {
         if(!state.data.plantillas) state.data.plantillas=[];
         state.data.plantillas.push(p);
         await apiPost({action:'add',sheet:'Plantillas',data:p});
-        // Solo genera vencimiento este mes si es mensual, o si es anual y coincide el mes
+        // Genera vencimiento para el mes actual si corresponde
         const generar = frecuencia==='mensual' || (frecuencia==='anual' && String(nowM)===String(mes));
         if(generar) {
-          const v={id:'v'+Date.now()+Math.random().toString(36).slice(2,6),empresaId,venc:pfx+'-'+pad2(d2),org,obligacion,estado:'pendiente',encargadoId,encargadoId2,tick1:'',tick2:''};
-          state.data.vencimientos.push(v);
-          await apiPost({action:'add',sheet:'Vencimientos',data:v});
+          const yaExiste = state.data.vencimientos.some(v =>
+            String(v.empresaId) === String(empresaId) && v.org === org &&
+            (v.obligacion||'').trim().toUpperCase() === (obligacion||'').trim().toUpperCase() &&
+            (v.venc||'').startsWith(pfx)
+          );
+          if(!yaExiste) {
+            const v={id:'v'+Date.now()+Math.random().toString(36).slice(2,6),empresaId,venc:pfx+'-'+pad2(d2),org,obligacion,estado:'pendiente',encargadoId,encargadoId2,tick1:'',tick2:''};
+            state.data.vencimientos.push(v);
+            await apiPost({action:'add',sheet:'Vencimientos',data:v});
+          }
         }
       }
       state.modals={};render();
