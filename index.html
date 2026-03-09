@@ -265,14 +265,35 @@ async function apiPost(payload) {
   try {
     lastWriteTime = Date.now();
     payload._code = state.accessCode;
-    const encoded = encodeURIComponent(JSON.stringify(payload));
-    const url = state.apiUrl + '?write=1&payload=' + encoded;
-    const resp = await fetch(url, {method:'GET', redirect:'follow'});
+    const body = JSON.stringify(payload);
+    // Use POST to avoid URL length limits (GET breaks with large payloads like Facturas)
     try {
+      const resp = await fetch(state.apiUrl, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body,
+        redirect:'follow'
+      });
       const text = await resp.text();
       const result = JSON.parse(text);
-      if(result.error) { state.error = 'Error: '+result.error; render(); }
-    } catch(e) { /* OK */ }
+      if(result.error) {
+        console.error('apiPost error:', result.error, payload);
+        state.error = '❌ Error guardando en '+( payload.sheet||'?')+': '+result.error;
+        render();
+      } else {
+        console.log('apiPost OK:', payload.action, payload.sheet, payload.id||payload.data?.id||'');
+      }
+    } catch(postErr) {
+      // Fallback to GET if POST blocked (embedded mode)
+      const encoded = encodeURIComponent(body);
+      const url = state.apiUrl + '?write=1&payload=' + encoded;
+      const resp2 = await fetch(url, {method:'GET', redirect:'follow'});
+      try {
+        const text2 = await resp2.text();
+        const result2 = JSON.parse(text2);
+        if(result2.error) { state.error = 'Error: '+result2.error; render(); }
+      } catch(e) { /* OK */ }
+    }
   } catch(e) { state.error = 'Error sync: '+e.message; render(); }
 }
 
@@ -3648,7 +3669,11 @@ function facMesLabel(ym) {
 }
 
 function getHonConfig() {
-  return state.data.honorariosConfig || [];
+  return (state.data.honorariosConfig || []).map(h=>({
+    ...h,
+    // Sheet devuelve strings: 'true'/'false'. Convertir a booleano real.
+    automatico: h.automatico === true || h.automatico === 'true' || h.automatico === 1
+  }));
 }
 
 function getFacturasMes(mes) {
