@@ -3885,6 +3885,14 @@ function renderFacPendientes(c, D) {
   });
   c.append(cards);
 
+  // Botón global para agregar saldo inicial (siempre visible)
+  const btnNuevoSaldo = el('button',{
+    style:{padding:'8px 16px',borderRadius:'8px',fontSize:'13px',fontWeight:700,cursor:'pointer',
+      background:'#7C3AED',color:'#fff',border:'none',marginBottom:'20px'},
+    onClick:()=>{ state.modals.addSaldoInicial = {}; render(); }
+  },'+ Saldo inicial');
+  c.append(btnNuevoSaldo);
+
   if(!clientes.length) {
     c.append(el('div',{style:{background:'#F0FDF4',border:'1px solid #BBF7D0',borderRadius:'14px',padding:'40px',textAlign:'center',color:'#059669',fontSize:'14px',fontWeight:700}},'🎉 Todo cobrado. Sin pendientes.'));
     return;
