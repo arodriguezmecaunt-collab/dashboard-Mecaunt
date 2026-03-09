@@ -844,8 +844,8 @@ function renderRecurrentes(c) {
   const prox = pend.filter(v=>{const d=daysUntil(v.venc);return d>=0&&d<=7});
   const comp = monthVenc.filter(v=>v.estado==='completado');
 
-  const prevMonth = () => { let m=M-1,y=Y; if(m<1){m=12;y--} state.viewMonth=m;state.viewYear=y; render(); };
-  const nextMonth = () => { let m=M+1,y=Y; if(m>12){m=1;y++} state.viewMonth=m;state.viewYear=y; render(); };
+  const prevMonth = () => { let m=M-1,y=Y; if(m<1){m=12;y--} state.viewMonth=m;state.viewYear=y; autoGenerate(y,m); render(); };
+  const nextMonth = () => { let m=M+1,y=Y; if(m>12){m=1;y++} state.viewMonth=m;state.viewYear=y; autoGenerate(y,m); render(); };
   const isCurrentMonth = M===new Date().getMonth()+1 && Y===new Date().getFullYear();
 
   c.append(makeHeader('Recurrentes',
@@ -1209,8 +1209,8 @@ function renderTareas(c) {
   const vencidos = filtered.filter(i=>!i.isDone&&i.fecha&&daysUntil(i.fecha)<0).length;
 
   // Month navigation
-  const prevMonth = () => { let m=M-1,y=Y; if(m<1){m=12;y--} state.viewMonth=m;state.viewYear=y; render(); };
-  const nextMonth = () => { let m=M+1,y=Y; if(m>12){m=1;y++} state.viewMonth=m;state.viewYear=y; render(); };
+  const prevMonth = () => { let m=M-1,y=Y; if(m<1){m=12;y--} state.viewMonth=m;state.viewYear=y; autoGenerate(y,m); render(); };
+  const nextMonth = () => { let m=M+1,y=Y; if(m>12){m=1;y++} state.viewMonth=m;state.viewYear=y; autoGenerate(y,m); render(); };
   const isCurrentMonth = M===new Date().getMonth()+1 && Y===new Date().getFullYear();
 
   c.append(makeHeader('Tareas',totalPend+' pendientes \u00b7 '+totalDone+' completadas',[
