@@ -198,21 +198,28 @@ async function autoGenerate(year, month) {
   const existing = state.data.vencimientos.filter(v=>(v.venc||'').startsWith(prefix));
   const newVencs = [];
 
-  // 1. Generate from plantillas (only if no vencimientos exist for this month)
-  if(existing.length === 0) {
-    const plantillas = state.data.plantillas||[];
-    const maxDay = lastDay(year, month);
-    plantillas.forEach(p => {
-      // Mensual: genera todos los meses. Anual: solo genera en el mes indicado
-      const freq = p.frecuencia || 'mensual';
-      if(freq === 'anual') {
-        const mesPl = Number(p.mes)||0;
-        if(mesPl !== month) return; // solo en el mes correcto
-      }
-      const dia = Math.min(Number(p.dia)||1, maxDay);
-      newVencs.push({id:'v'+Date.now()+Math.random().toString(36).slice(2,6), empresaId:p.empresaId, venc:prefix+'-'+pad2(dia), org:p.org, obligacion:p.obligacion, estado:'pendiente', encargadoId:p.encargadoId||'', encargadoId2:p.encargadoId2||'', tick1:'', tick2:''});
-    });
-  }
+  // 1. Generate from plantillas (por plantilla individual, para poder completar meses parciales)
+  const plantillas = state.data.plantillas||[];
+  const maxDay = lastDay(year, month);
+  plantillas.forEach(p => {
+    // Mensual: genera todos los meses. Anual: solo genera en el mes indicado
+    const freq = p.frecuencia || 'mensual';
+    if(freq === 'anual') {
+      const mesPl = Number(p.mes)||0;
+      if(mesPl !== month) return; // solo en el mes correcto
+    }
+    const dia = Math.min(Number(p.dia)||1, maxDay);
+    const fechaVenc = prefix+'-'+pad2(dia);
+    // Chequear si ya existe un vencimiento para esta plantilla en este mes
+    const yaExiste = existing.some(v =>
+      v.empresaId === p.empresaId &&
+      v.org === p.org &&
+      (v.obligacion||'').trim() === (p.obligacion||'').trim() &&
+      (v.venc||'').startsWith(prefix)
+    );
+    if(yaExiste) return;
+    newVencs.push({id:'v'+Date.now()+Math.random().toString(36).slice(2,6), empresaId:p.empresaId, venc:fechaVenc, org:p.org, obligacion:p.obligacion, estado:'pendiente', encargadoId:p.encargadoId||'', encargadoId2:p.encargadoId2||'', tick1:'', tick2:''});
+  });
 
   // 2. Generate DJ tasks from fecha_bce
   // DJ vence 4 meses despues del balance, se genera 1 mes antes para avisar
@@ -844,8 +851,8 @@ function renderRecurrentes(c) {
   const prox = pend.filter(v=>{const d=daysUntil(v.venc);return d>=0&&d<=7});
   const comp = monthVenc.filter(v=>v.estado==='completado');
 
-  const prevMonth = () => { let m=M-1,y=Y; if(m<1){m=12;y--} state.viewMonth=m;state.viewYear=y; autoGenerate(y,m); render(); };
-  const nextMonth = () => { let m=M+1,y=Y; if(m>12){m=1;y++} state.viewMonth=m;state.viewYear=y; autoGenerate(y,m); render(); };
+  const prevMonth = async () => { let m=M-1,y=Y; if(m<1){m=12;y--} state.viewMonth=m;state.viewYear=y; await autoGenerate(y,m); render(); };
+  const nextMonth = async () => { let m=M+1,y=Y; if(m>12){m=1;y++} state.viewMonth=m;state.viewYear=y; await autoGenerate(y,m); render(); };
   const isCurrentMonth = M===new Date().getMonth()+1 && Y===new Date().getFullYear();
 
   c.append(makeHeader('Recurrentes',
@@ -1209,8 +1216,8 @@ function renderTareas(c) {
   const vencidos = filtered.filter(i=>!i.isDone&&i.fecha&&daysUntil(i.fecha)<0).length;
 
   // Month navigation
-  const prevMonth = () => { let m=M-1,y=Y; if(m<1){m=12;y--} state.viewMonth=m;state.viewYear=y; autoGenerate(y,m); render(); };
-  const nextMonth = () => { let m=M+1,y=Y; if(m>12){m=1;y++} state.viewMonth=m;state.viewYear=y; autoGenerate(y,m); render(); };
+  const prevMonth = async () => { let m=M-1,y=Y; if(m<1){m=12;y--} state.viewMonth=m;state.viewYear=y; await autoGenerate(y,m); render(); };
+  const nextMonth = async () => { let m=M+1,y=Y; if(m>12){m=1;y++} state.viewMonth=m;state.viewYear=y; await autoGenerate(y,m); render(); };
   const isCurrentMonth = M===new Date().getMonth()+1 && Y===new Date().getFullYear();
 
   c.append(makeHeader('Tareas',totalPend+' pendientes \u00b7 '+totalDone+' completadas',[
