@@ -292,7 +292,7 @@ function autoGenerarFacturasAuto() {
   // Guardar en background
   (async()=>{
     for(const fac of nuevas) {
-      await apiPost({action:'add',sheet:'Facturas',data:fac});
+      await upsertFactura(fac);
     }
   })();
 }
@@ -315,10 +315,13 @@ async function apiPost(payload) {
         state.error = '❌ '+( payload.sheet||'?')+': '+result.error;
         render();
       } else {
-        console.log('apiPost OK:', payload.action, payload.sheet, result);
+        console.log('✅ apiPost OK:', payload.action, payload.sheet, payload.id||payload.data?.id, result);
       }
     } catch(e) { /* non-JSON response, ignore */ }
-  } catch(e) { state.error = 'Error sync: '+e.message; render(); }
+  } catch(e) { 
+    console.error('apiPost catch:', e);
+    state.error = '❌ Error de red: '+e.message; render(); 
+  }
 }
 
 // Para facturas: update con solo los campos esenciales para no superar límite de URL
@@ -369,6 +372,25 @@ async function deleteDoc(doc) {
   state.data.documentos = (state.data.documentos||[]).filter(d=>d.id!==doc.id);
   await apiPost({action:'deleteFile',fileId:doc.driveFileId,docId:doc.id});
   render();
+}
+
+// Test rápido de escritura en Facturas — llamar desde consola: testFacturasWrite()
+async function testFacturasWrite() {
+  const testId = 'TEST_'+Date.now();
+  const testFac = {id:testId,mes:'2099-01',cliente:'__TEST__',concepto:'TEST',monto:1,montoAjustado:1,iva:0,total:1,moneda:'UYU',emisor:'TEST',ajuste:0,automatico:false,estado:'pendiente',fechaCreacion:'2099-01-01',fechaCobro:''};
+  console.log('🔧 Testing Facturas write...');
+  const encoded = encodeURIComponent(JSON.stringify({action:'update',sheet:'Facturas',id:testId,data:testFac,_code:state.accessCode}));
+  const url = state.apiUrl + '?write=1&payload=' + encoded;
+  console.log('URL length:', url.length);
+  try {
+    const r = await fetch(url, {method:'GET', redirect:'follow'});
+    const text = await r.text();
+    console.log('Response:', text);
+    alert('Test result: ' + text + '\nURL length: ' + url.length);
+    // Cleanup
+    const encoded2 = encodeURIComponent(JSON.stringify({action:'delete',sheet:'Facturas',id:testId,_code:state.accessCode}));
+    await fetch(state.apiUrl + '?write=1&payload=' + encoded2, {method:'GET', redirect:'follow'});
+  } catch(e) { alert('Error: '+e.message); }
 }
 
 async function connect(url, code) {
@@ -4264,6 +4286,27 @@ function renderModalAddHonConfig(c, EMISORES) {
     if(!state.data.honorariosConfig) state.data.honorariosConfig=[];
     state.data.honorariosConfig.push(h);
     apiPost({action:'add',sheet:'HonorariosConfig',data:h});
+    // Si es automático, crear factura del mes actual inmediatamente
+    if(h.automatico) {
+      const hoy2 = new Date();
+      const mesKey2 = hoy2.getFullYear()+'-'+pad2(hoy2.getMonth()+1);
+      const yaExiste2 = (state.data.facturas||[]).find(f=>
+        f.mes===mesKey2 && (f.cliente||'').toLowerCase()===(h.empresaNombre||'').toLowerCase() && f.estado!=='saldo_inicial'
+      );
+      if(!yaExiste2) {
+        const mon2=(h.moneda||'UYU').trim();
+        const m2=Number(h.monto||0);
+        const iv2=mon2==='UYU'?Math.round(m2*0.22):0;
+        const fac2={id:'fac'+Date.now()+Math.round(Math.random()*9999),mes:mesKey2,
+          cliente:h.empresaNombre||'',concepto:'Honorarios '+facMesLabel(mesKey2),
+          monto:m2,montoAjustado:m2,iva:iv2,total:m2+iv2,moneda:mon2,emisor:h.emisor||'',
+          ajuste:0,estado:'emitida',automatico:true,
+          fechaCreacion:hoy2.toISOString().slice(0,10),fechaCobro:''};
+        if(!state.data.facturas) state.data.facturas=[];
+        state.data.facturas.push(fac2);
+        upsertFactura(fac2);
+      }
+    }
     state.modals.addHonConfig=false;render();
   }},'💾 Guardar');
   makeModal('Nuevo cliente',[
