@@ -98,7 +98,7 @@ const el = (tag, attrs={}, ...children) => {
 // State
 let state = {
   data: { empresas:[], vencimientos:[], plantillas:[], tareas:[], empleados:[{id:"e1",nombre:"Admin",color:"#3B82F6"}], horasTrabajadas:[], accesos:[], documentos:[], ausencias:[], comentarios:[], categoriasEmp:[], licencias:[], licPlanificacion:[], licRestringidos:[], licSolicitudes:[] },
-  apiUrl: localStorage.getItem('estudio-api-url') || SCRIPT_URL || '',
+  apiUrl: SCRIPT_URL || sessionStorage.getItem('estudio-api-url') || '',
   accessCode: localStorage.getItem('estudio-access-code') || '',
   accessName: localStorage.getItem('estudio-access-name') || '',
   isAdmin: false,
@@ -343,7 +343,7 @@ async function connect(url, code) {
     state.accessCode = code || state.accessCode;
     const d = await apiGet(url, code);
     state.data = d; state.apiUrl = url;
-    localStorage.setItem('estudio-api-url', url);
+    if(!SCRIPT_URL) sessionStorage.setItem('estudio-api-url', url); // only store if not embedded
     localStorage.setItem('estudio-access-code', state.accessCode);
     localStorage.setItem('estudio-access-name', state.accessName);
     state.lastSync = new Date(); state.modals = {};
@@ -390,7 +390,7 @@ async function refresh() {
     state.isAdmin = d._isAdmin || false;
     if(d._userName) state.accessName = d._userName;
   } catch(e) { 
-    if(e.message.includes('acceso')) { state.apiUrl=''; state.accessCode=''; localStorage.removeItem('estudio-api-url'); localStorage.removeItem('estudio-access-code'); }
+    if(e.message.includes('acceso')) { state.accessCode=''; if(!SCRIPT_URL){state.apiUrl='';sessionStorage.removeItem('estudio-api-url');} localStorage.removeItem('estudio-access-code'); }
     state.error = 'Error: '+e.message; 
   }
   state.syncing = false; render();
@@ -569,7 +569,7 @@ function render() {
     el('div',{style:{padding:'12px 10px 20px',display:'flex',flexDirection:'column',gap:'6px'}},
       state.accessName?el('div',{style:{padding:'8px 14px',fontSize:'12px',color:'#94A3B8'}},'\u263a '+state.accessName+(state.isAdmin?' (Admin)':'')):'',
       el('button',{onClick:()=>{state.modals.config=true;render()},style:{width:'100%',padding:'8px',background:'transparent',border:'1px solid #334155',borderRadius:'8px',color:'#64748B',fontSize:'11px',fontWeight:600,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},'Configuracion'),
-      el('button',{onClick:()=>{state.apiUrl='';state.accessCode='';state.accessName='';localStorage.removeItem('estudio-api-url');localStorage.removeItem('estudio-access-code');localStorage.removeItem('estudio-access-name');render()},style:{width:'100%',padding:'8px',background:'transparent',border:'1px solid #7F1D1D',borderRadius:'8px',color:'#DC2626',fontSize:'11px',fontWeight:600,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},'Cerrar sesion')
+      el('button',{onClick:()=>{state.accessCode='';state.accessName='';state.isAdmin=false;if(!SCRIPT_URL){state.apiUrl='';sessionStorage.removeItem('estudio-api-url');}localStorage.removeItem('estudio-access-code');localStorage.removeItem('estudio-access-name');render()},style:{width:'100%',padding:'8px',background:'transparent',border:'1px solid #7F1D1D',borderRadius:'8px',color:'#DC2626',fontSize:'11px',fontWeight:600,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},'Cerrar sesion')
     )
   );
   app.append(sidebar);
@@ -3750,8 +3750,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
     const sessionExpirada = now.getTime() >= hoy20 && lastCheck < hoy20;
     if(sessionExpirada) {
-      state.apiUrl = ''; state.accessCode = ''; state.accessName = '';
-      localStorage.removeItem('estudio-api-url');
+      state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
       localStorage.removeItem('estudio-last-check');
@@ -3771,8 +3770,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
     const lastCheck = parseInt(localStorage.getItem('estudio-last-check') || '0');
     if(now.getTime() >= hoy20 && lastCheck < hoy20) {
-      state.apiUrl = ''; state.accessCode = ''; state.accessName = '';
-      localStorage.removeItem('estudio-api-url');
+      state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
       localStorage.removeItem('estudio-last-check');
