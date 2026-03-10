@@ -293,7 +293,7 @@ async function apiPost(payload) {
     state.error = '❌ Error de red: '+e.message; render();
   }
 }
-const flatEmp = e => ({id:e.id,nombre:e.nombre,rut:e.rut||'',categoria:e.categoria||'',categoria2:e.categoria2||'',clave_bps:e.claves?.bps||'',clave_dgi:e.claves?.dgi||'',clave_anv:e.claves?.anv||'',notas:e.notas||'',fecha_bce:e.fecha_bce||'',carpeta:e.carpeta||''});
+const flatEmp = e => ({id:e.id,nombre:e.nombre,rut:e.rut||'',nro_bps:e.nro_bps||'',categoria:e.categoria||'',categoria2:e.categoria2||'',clave_bps:e.claves?.bps||'',clave_dgi:e.claves?.dgi||'',clave_anv:e.claves?.anv||'',notas:e.notas||'',fecha_bce:e.fecha_bce||'',carpeta:e.carpeta||''});
 
 const defaultCats = [
   {value:'no_cede',label:'No Cede',bg:'#DBEAFE',text:'#1D4ED8'},
@@ -1608,6 +1608,7 @@ function renderEmpresaDetail(c) {
 
   card1.append(el('div',{style:{display:'flex',flexDirection:'column',gap:'12px',marginBottom:'20px'}},
     makeField('RUT',emp.rut,v=>{emp.rut=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{rut:v}})}),
+    makeField('Número BPS',emp.nro_bps||'',v=>{emp.nro_bps=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{nro_bps:v}})}),
     makeClaveField('Clave BPS', emp.id, 'clave_bps', v=>{apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_bps:v}})}),
     makeClaveField('Clave DGI', emp.id, 'clave_dgi', v=>{apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_dgi:v}})}),
     makeClaveField('Clave ANV', emp.id, 'clave_anv', v=>{apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_anv:v}})})
