@@ -3543,6 +3543,18 @@ function renderModalAddLicRest(app) {
   );
   makeModal('🚫 Agregar días restringidos',[fMes,fDia,fHasta,fMot,btns],app);
 }
+
+// === INICIALIZACIÓN ===
+document.addEventListener('DOMContentLoaded', async () => {
+  state.loading = false;
+  if(state.apiUrl && state.accessCode) {
+    await refresh();
+  } else {
+    render();
+  }
+  // Auto-refresh every 5 minutes
+  setInterval(silentRefresh, 5 * 60 * 1000);
+});
 </script>
 </body>
 </html>
