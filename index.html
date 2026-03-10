@@ -395,6 +395,37 @@ function myEmpleadoId() {
 
 // Notifications queue
 let notifications = [];
+
+// === CLAVE MAESTRA (solo en memoria, nunca en localStorage) ===
+let _sessionMasterKey = '';
+
+async function fetchClave(empId, field, displayEl) {
+  // Pedir clave maestra si no está en sesión
+  if (!_sessionMasterKey) {
+    const key = prompt('Ingresá la clave maestra para ver esta contraseña:');
+    if (!key) return;
+    _sessionMasterKey = key;
+  }
+  displayEl.textContent = '⏳';
+  try {
+    const url = state.apiUrl + '?action=getSecret&code=' + encodeURIComponent(state.accessCode)
+      + '&masterKey=' + encodeURIComponent(_sessionMasterKey)
+      + '&sheet=Empresas&id=' + encodeURIComponent(empId)
+      + '&field=' + encodeURIComponent(field);
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.error) {
+      if (d.error.includes('maestra')) _sessionMasterKey = ''; // limpiar si fue incorrecta
+      displayEl.textContent = '❌ ' + d.error;
+    } else {
+      displayEl.textContent = d.value || '(vacía)';
+      displayEl.style.fontFamily = "'DM Mono', monospace";
+      displayEl.style.color = '#0F172A';
+    }
+  } catch(e) {
+    displayEl.textContent = '❌ Error';
+  }
+}
 function showNotif(msg) {
   notifications.push(msg);
   renderNotifs();
@@ -1482,6 +1513,27 @@ function renderEmpresaDetail(c) {
     return el('div',{},el('label',{style:{fontSize:'11px',fontWeight:600,color:'#94A3B8',textTransform:'uppercase'}},label),inp);
   };
 
+  const makeClaveField = (label, empId, field, onSave) => {
+    const wrap = el('div');
+    wrap.append(el('label',{style:{fontSize:'11px',fontWeight:600,color:'#94A3B8',textTransform:'uppercase',display:'block',marginBottom:'4px'}},label));
+    const row = el('div',{style:{display:'flex',gap:'8px',alignItems:'center'}});
+    const display = el('span',{style:{fontSize:'13px',color:'#94A3B8',fontStyle:'italic'}},'••••••');
+    const verBtn = el('button',{style:{padding:'5px 12px',fontSize:'12px',background:'#F1F5F9',border:'1px solid #E2E8F0',borderRadius:'6px',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",whiteSpace:'nowrap'}},'👁 Ver');
+    const editBtn = el('button',{style:{padding:'5px 12px',fontSize:'12px',background:'#F1F5F9',border:'1px solid #E2E8F0',borderRadius:'6px',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",whiteSpace:'nowrap'}},'✏️ Editar');
+    verBtn.addEventListener('click', () => fetchClave(empId, field, display));
+    editBtn.addEventListener('click', () => {
+      const newVal = prompt('Nueva ' + label + ':');
+      if (newVal === null) return;
+      onSave(newVal);
+      display.textContent = '••••••';
+      display.style.fontStyle = 'italic';
+      display.style.color = '#94A3B8';
+    });
+    row.append(display, verBtn, editBtn);
+    wrap.append(row);
+    return wrap;
+  };
+
   const card1=el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'28px',marginBottom:'24px'}});
   card1.append(
     el('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'20px',flexWrap:'wrap',gap:'12px'}},
@@ -1534,9 +1586,9 @@ function renderEmpresaDetail(c) {
 
   card1.append(el('div',{style:{display:'flex',flexDirection:'column',gap:'12px',marginBottom:'20px'}},
     makeField('RUT',emp.rut,v=>{emp.rut=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{rut:v}})}),
-    makeField('Clave BPS',emp.claves?.bps,v=>{emp.claves.bps=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_bps:v}})}),
-    makeField('Clave DGI',emp.claves?.dgi,v=>{emp.claves.dgi=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_dgi:v}})}),
-    makeField('Clave ANV',emp.claves?.anv,v=>{emp.claves.anv=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_anv:v}})})
+    makeClaveField('Clave BPS', emp.id, 'clave_bps', v=>{apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_bps:v}})}),
+    makeClaveField('Clave DGI', emp.id, 'clave_dgi', v=>{apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_dgi:v}})}),
+    makeClaveField('Clave ANV', emp.id, 'clave_anv', v=>{apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{clave_anv:v}})})
   ));
   card1.append(el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:'16px',marginBottom:'20px'}},
     makeField('Ubicacion Carpeta Fisica',emp.carpeta,v=>{emp.carpeta=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{carpeta:v}})})
