@@ -108,7 +108,7 @@ let state = {
   selEmpl: null,
   viewMonth: new Date().getMonth()+1,
   viewYear: new Date().getFullYear(),
-  filters: { org:'todos', estado:'todos', enc:'todos', tareaEst:'todos', tareaEnc:'todos', tareaSearch:'', tareaTipo:'todos', tareaDept:'mio', calEnc:'todos', calSearch:'', empCat:'todos', empSort:'nombre', empSortDir:'asc', horasEnc:'todos', horasEmp:'todos', horasDesde:'', horasHasta:'' },
+  filters: { org:'todos', estado:'todos', enc:'todos', tareaEst:'todos', tareaEnc:'todos', tareaSearch:'', tareaTipo:'todos', tareaDept:'mio', tareaVista:'lista', calEnc:'todos', calSearch:'', empCat:'todos', empSort:'nombre', empSortDir:'asc', horasEnc:'todos', horasEmp:'todos', horasDesde:'', horasHasta:'' },
   loading: true,
   syncing: false,
   error: '',
@@ -119,6 +119,7 @@ let state = {
 const fmt = d => { if(!d) return ''; const p = String(d).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : String(d); };
 const _now = new Date();
 const todayStr = _now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0')+'-'+String(_now.getDate()).padStart(2,'0');
+function tomorrowStr(){const t=new Date(_now);t.setDate(t.getDate()+1);return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');}
 const daysUntil = ds => Math.ceil((new Date(ds+'T00:00:00') - new Date(todayStr+'T00:00:00')) / 86400000);
 const empName = id => state.data.empresas.find(e=>e.id===id)?.nombre || '\u2014';
 const sortedEmps = () => [...state.data.empresas].sort((a,b)=>a.nombre.localeCompare(b.nombre));
@@ -1235,10 +1236,16 @@ function renderTareas(c) {
     {l:'Completados',v:totalDone,c:'#059669'}
   ]));
 
-  // Type pills
-  const typePills = el('div',{style:{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'16px'}});
+  // Type pills + vista toggle
+  const typePills = el('div',{style:{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'16px',alignItems:'center'}});
   [{v:'todos',l:'Todos',c:'#4F46E5'},{v:'recurrente',l:'Recurrentes',c:'#7C3AED'},{v:'puntual',l:'Puntuales',c:'#0284C7'}].forEach(tp=>{
     typePills.append(el('button',{onClick:()=>{state.filters.tareaTipo=tp.v;render()},style:{border:tipo===tp.v?'2px solid '+tp.c:'2px solid #E2E8F0',background:tipo===tp.v?tp.c+'15':'#fff',color:tipo===tp.v?tp.c:'#64748B',padding:'6px 14px',borderRadius:'8px',fontSize:'12px',fontWeight:700,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},tp.l));
+  });
+  // Vista toggle (Lista / Día a día)
+  const vistaToggle = el('div',{style:{marginLeft:'auto',display:'flex',gap:'4px',background:'#F1F5F9',borderRadius:'10px',padding:'3px'}});
+  [{v:'lista',l:'☰ Lista'},{v:'diadia',l:'📅 Día a día'}].forEach(vt=>{
+    const active = state.filters.tareaVista===vt.v;
+    vistaToggle.append(el('button',{onClick:()=>{state.filters.tareaVista=vt.v;render()},style:{border:'none',background:active?'#fff':'transparent',color:active?'#4F46E5':'#94A3B8',padding:'5px 12px',borderRadius:'7px',fontSize:'12px',fontWeight:700,cursor:'pointer',fontFamily:"'DM Sans',sans-serif",boxShadow:active?'0 1px 4px rgba(0,0,0,.08)':'none',transition:'all .15s'}},vt.l));
   });
   // Org pills (only when showing recurrentes)
   if(tipo==='todos'||tipo==='recurrente') {
@@ -1246,6 +1253,7 @@ function renderTareas(c) {
       typePills.append(el('button',{className:'org-btn',onClick:()=>{state.filters.org=o;render()},style:{border:state.filters.org===o?'2px solid #4F46E5':'2px solid #E2E8F0',background:state.filters.org===o?'#EEF2FF':'#fff',color:state.filters.org===o?'#4F46E5':'#94A3B8',padding:'6px 14px',borderRadius:'8px',fontSize:'11px',fontWeight:700,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},o==='todos'?'Org: Todos':o));
     });
   }
+  typePills.append(vistaToggle);
   c.append(typePills);
 
   // Department pills
@@ -1403,6 +1411,117 @@ function renderTareas(c) {
     list.append(card);
   });
   c.append(list);
+
+  // ===== VISTA DÍA A DÍA =====
+  if(state.filters.tareaVista==='diadia') {
+    list.style.display='none';
+    const diadiaWrap = el('div',{style:{display:'flex',flexDirection:'column',gap:'0'}});
+    if(filtered.length===0) diadiaWrap.append(el('div',{className:'card',style:{padding:'48px',textAlign:'center',color:'#94A3B8'}},'Sin tareas'));
+
+    // Group by date
+    const sinFecha = filtered.filter(it=>!it.fecha);
+    const conFecha = filtered.filter(it=>!!it.fecha);
+
+    // Get unique dates sorted
+    const uniqueDates = [...new Set(conFecha.map(it=>it.fecha))].sort();
+
+    const renderDayGroup = (dateStr, items) => {
+      const isToday = dateStr===todayStr;
+      const isTomorrow = dateStr===tomorrowStr();
+      const isPast = dateStr<todayStr;
+      const d = new Date(dateStr+'T12:00:00');
+      const diasSem = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+      const label = isToday ? '📌 Hoy — '+fmt(dateStr) : isTomorrow ? '📅 Mañana — '+fmt(dateStr) : diasSem[d.getDay()]+' '+fmt(dateStr);
+      const pendInDay = items.filter(i=>!i.isDone).length;
+      const doneInDay = items.filter(i=>i.isDone).length;
+
+      const headerBg = isToday?'#EFF6FF':isTomorrow?'#F0FDF4':isPast?'#FEF2F2':'#FAFAFA';
+      const headerBorder = isToday?'#BFDBFE':isTomorrow?'#BBF7D0':isPast?'#FECACA':'#E2E8F0';
+      const headerColor = isToday?'#1D4ED8':isTomorrow?'#15803D':isPast?'#DC2626':'#475569';
+
+      const header = el('div',{style:{
+        display:'flex',alignItems:'center',justifyContent:'space-between',
+        padding:'10px 16px',background:headerBg,border:'1px solid '+headerBorder,
+        borderRadius:'10px 10px 0 0',marginTop:'16px',cursor:'pointer',userSelect:'none'
+      }});
+      const headerLeft = el('div',{style:{display:'flex',alignItems:'center',gap:'12px'}});
+      headerLeft.append(
+        el('span',{style:{fontSize:'13px',fontWeight:800,color:headerColor,fontFamily:"'DM Mono',monospace"}},label),
+        pendInDay>0?el('span',{style:{fontSize:'11px',fontWeight:700,color:isPast?'#DC2626':'#D97706',background:isPast?'#FEF2F2':'#FFFBEB',padding:'2px 8px',borderRadius:'20px',border:'1px solid '+(isPast?'#FECACA':'#FDE68A')}},pendInDay+' pendiente'+(pendInDay!==1?'s':'')):''
+      );
+      const headerRight = el('span',{style:{fontSize:'11px',color:'#94A3B8',fontWeight:600}},items.length+' tarea'+(items.length!==1?'s':'')+(doneInDay?' · '+doneInDay+' ✓':''));
+      header.append(headerLeft, headerRight);
+
+      const groupBody = el('div',{style:{display:'flex',flexDirection:'column',gap:'1px',border:'1px solid '+headerBorder,borderTop:'none',borderRadius:'0 0 10px 10px',overflow:'hidden',marginBottom:'2px'}});
+
+      items.forEach(it=>{
+        const isVenc=it._src==='venc';
+        const item=it._item;
+        const enc1=state.data.empleados.find(e=>e.id===it.encargadoId);
+        const enc2=state.data.empleados.find(e=>e.id===it.encargadoId2);
+        const has2=!!it.encargadoId2;
+        const ov=it.fecha&&!it.isDone&&daysUntil(it.fecha)<0;
+        const sheetName=isVenc?'Vencimientos':'Tareas';
+        const doneState=isVenc?'completado':'completada';
+        const updateEstado=(tickKey)=>{
+          const done=item[tickKey]==='true';
+          if(done){item[tickKey]='';if(has2)item.estado=(item.tick1==='true'&&item.tick2==='true')?doneState:'pendiente';else item.estado='pendiente';apiPost({action:'update',sheet:sheetName,id:item.id,data:{tick1:item.tick1||'',tick2:item.tick2||'',estado:item.estado}});render();}
+          else{const encId=tickKey==='tick1'?it.encargadoId:it.encargadoId2;state.modals.completar={type:isVenc?'venc':'tarea',item,tickKey,encargadoId:encId};render();}
+        };
+        const makeCheck=(tickKey,encObj)=>{const done=item[tickKey]==='true';const btn=el('button',{className:'check-btn',style:{marginTop:'2px'},onClick:()=>updateEstado(tickKey)});btn.style.border=done?'none':'2px solid '+(encObj?.color||'#CBD5E1');btn.style.background=done?(encObj?.color||'#059669'):'#fff';btn.style.color='#fff';if(done)btn.innerHTML='✓';return btn;};
+        const checksDiv=el('div',{style:{display:'flex',flexDirection:'column',gap:'6px',alignItems:'center'}});
+        checksDiv.append(makeCheck('tick1',enc1));
+        if(has2)checksDiv.append(makeCheck('tick2',enc2));
+
+        const typeBadge=isVenc?el('span',{style:{fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'4px',background:orgC(it.org).bg,color:orgC(it.org).text}},it.org):el('span',{style:{fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'4px',background:'#F0F9FF',color:'#0284C7'}},'Puntual');
+        const titleSpan=el('span',{style:{fontSize:'13px',fontWeight:700,color:it.isDone?'#94A3B8':'#0F172A',textDecoration:it.isDone?'line-through':'none'}},it.titulo);
+        const prioColors=it.prioridad==='alta'?{bg:'#FEF2F2',t:'#DC2626',b:'#FECACA'}:it.prioridad==='baja'?{bg:'#F0F9FF',t:'#0284C7',b:'#BAE6FD'}:{bg:'#FFFBEB',t:'#D97706',b:'#FDE68A'};
+        const prioBadge=!isVenc?el('span',{className:'badge',style:{background:prioColors.bg,color:prioColors.t,border:'1px solid '+prioColors.b}},it.prioridad==='alta'?'Alta':it.prioridad==='baja'?'Baja':'Media'):'';
+
+        const meta=el('div',{style:{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center',marginTop:'4px'}});
+        if(it.empresaId)meta.append(el('span',{style:{fontSize:'11px',color:'#64748B',background:'#F1F5F9',padding:'2px 8px',borderRadius:'4px'}},empName(it.empresaId)));
+        if(enc1)meta.append(el('span',{style:{fontSize:'11px',color:enc1.color,background:enc1.color+'18',padding:'2px 8px',borderRadius:'4px',fontWeight:600}},enc1.nombre));
+        if(enc2)meta.append(el('span',{style:{fontSize:'11px',color:enc2.color,background:enc2.color+'18',padding:'2px 8px',borderRadius:'4px',fontWeight:600}},enc2.nombre));
+
+        const delBtn=el('button',{className:'trash-btn',style:{flexShrink:0},onClick:()=>{if(!confirm('Eliminar "'+it.titulo+'"?'))return;if(isVenc){state.data.vencimientos=state.data.vencimientos.filter(x=>x.id!==item.id);apiPost({action:'delete',sheet:'Vencimientos',id:item.id});}else{state.data.tareas=state.data.tareas.filter(x=>x.id!==item.id);apiPost({action:'delete',sheet:'Tareas',id:item.id});}render();},innerHTML:'🗑'});
+        const comBtn=el('button',{className:'trash-btn',style:{flexShrink:0,color:'#94A3B8'},onClick:()=>{state.modals.comentario={refType:isVenc?'venc':'tarea',refId:item.id,refLabel:it.titulo};render();},innerHTML:'💬'});
+        const editBtn=el('button',{className:'trash-btn',style:{flexShrink:0,color:'#64748B'},onClick:()=>{state.modals.editTarea={item,isVenc};render();},innerHTML:'✏'});
+
+        const encCell=isVenc?el('div',{style:{display:'flex',gap:'4px',marginTop:'4px'}}):'';
+        if(isVenc){const es1=el('select',{className:'enc-select'});es1.append(el('option',{value:''},'—'));state.data.empleados.forEach(e=>{const o=el('option',{value:e.id},e.nombre);if(item.encargadoId===e.id)o.selected=true;es1.append(o)});es1.addEventListener('change',e=>{item.encargadoId=e.target.value;apiPost({action:'update',sheet:'Vencimientos',id:item.id,data:{encargadoId:e.target.value}});render()});const es2=el('select',{className:'enc-select',style:{fontSize:'10px'}});es2.append(el('option',{value:''},'+ 2do'));state.data.empleados.forEach(e=>{const o=el('option',{value:e.id},e.nombre);if(item.encargadoId2===e.id)o.selected=true;es2.append(o)});es2.addEventListener('change',e=>{item.encargadoId2=e.target.value;item.tick2='';apiPost({action:'update',sheet:'Vencimientos',id:item.id,data:{encargadoId2:e.target.value,tick2:''}});render()});encCell.append(es1,es2);}
+
+        const rowCard=el('div',{style:{background:it.isDone?'#FAFAFA':ov?'#FFF5F5':'#fff',padding:'10px 14px',borderBottom:'1px solid #F1F5F9',display:'flex',alignItems:'flex-start',gap:'10px'}});
+        rowCard.append(checksDiv,el('div',{style:{flex:1,minWidth:0}},el('div',{style:{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'}},typeBadge,titleSpan,prioBadge),meta,encCell),el('div',{style:{display:'flex',flexDirection:'column',gap:'4px',alignItems:'center'}},comBtn,editBtn,delBtn));
+        groupBody.append(rowCard);
+      });
+
+      diadiaWrap.append(header,groupBody);
+    };
+
+    uniqueDates.forEach(dateStr=>{
+      const items=conFecha.filter(it=>it.fecha===dateStr);
+      renderDayGroup(dateStr,items);
+    });
+
+    if(sinFecha.length>0){
+      const sfHeader=el('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 16px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:'10px 10px 0 0',marginTop:'16px'}});
+      sfHeader.append(el('span',{style:{fontSize:'13px',fontWeight:800,color:'#94A3B8'}},'Sin fecha'),el('span',{style:{fontSize:'11px',color:'#94A3B8'}},sinFecha.length+' tarea'+(sinFecha.length!==1?'s':'')));
+      const sfBody=el('div',{style:{border:'1px solid #E2E8F0',borderTop:'none',borderRadius:'0 0 10px 10px',overflow:'hidden'}});
+      sinFecha.forEach(it=>{
+        const enc1=state.data.empleados.find(e=>e.id===it.encargadoId);
+        const titleSpan=el('span',{style:{fontSize:'13px',fontWeight:600,color:'#94A3B8'}},it.titulo);
+        const typeBadge=it._src==='venc'?el('span',{style:{fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'4px',background:orgC(it.org).bg,color:orgC(it.org).text}},it.org):el('span',{style:{fontSize:'10px',fontWeight:700,padding:'2px 8px',borderRadius:'4px',background:'#F0F9FF',color:'#0284C7'}},'Puntual');
+        const row=el('div',{style:{background:'#FAFAFA',padding:'10px 14px',borderBottom:'1px solid #F1F5F9',display:'flex',alignItems:'center',gap:'10px'}});
+        row.append(typeBadge,titleSpan);
+        if(enc1)row.append(el('span',{style:{fontSize:'11px',color:enc1.color,background:enc1.color+'18',padding:'2px 8px',borderRadius:'4px',fontWeight:600}},enc1.nombre));
+        if(it.empresaId)row.append(el('span',{style:{fontSize:'11px',color:'#94A3B8',background:'#F1F5F9',padding:'2px 8px',borderRadius:'4px'}},empName(it.empresaId)));
+        sfBody.append(row);
+      });
+      diadiaWrap.append(sfHeader,sfBody);
+    }
+
+    c.append(diadiaWrap);
+  }
 }
 
 // ===== EMPRESAS =====
