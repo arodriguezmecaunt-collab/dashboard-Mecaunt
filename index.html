@@ -2116,9 +2116,9 @@ function renderAccesos(c) {
 
     const statusBadge = el('span',{className:'badge',style:{background:isActive?'#ECFDF5':'#FEF2F2',color:isActive?'#059669':'#DC2626',border:'1px solid '+(isActive?'#A7F3D0':'#FECACA')}},isActive?'Activo':'Revocado');
     const rolBadge = el('span',{className:'badge',style:{
-      background:isAdm?'#FEF3C7':isFac?'#EEF2FF':'#F0F9FF',
-      color:isAdm?'#B45309':isFac?'#4F46E5':'#0284C7',
-      border:'1px solid '+(isAdm?'#FDE68A':isFac?'#C7D2FE':'#BAE6FD')
+      background:isAdm?'#FEF3C7':'#F0F9FF',
+      color:isAdm?'#B45309':'#0284C7',
+      border:'1px solid '+(isAdm?'#FDE68A':'#BAE6FD')
     }},isAdm?'Admin':'Usuario');
 
     const actionsDiv = el('div',{style:{display:'flex',gap:'6px'}});
