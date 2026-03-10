@@ -3602,12 +3602,41 @@ function renderModalAddLicRest(app) {
 document.addEventListener('DOMContentLoaded', async () => {
   state.loading = false;
   if(state.apiUrl && state.accessCode) {
+    // Cierre de sesión diario a las 20:00
+    const lastCheck = parseInt(localStorage.getItem('estudio-last-check') || '0');
+    const now = new Date();
+    const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
+    const sessionExpirada = now.getTime() >= hoy20 && lastCheck < hoy20;
+    if(sessionExpirada) {
+      state.apiUrl = ''; state.accessCode = ''; state.accessName = '';
+      localStorage.removeItem('estudio-api-url');
+      localStorage.removeItem('estudio-access-code');
+      localStorage.removeItem('estudio-access-name');
+      localStorage.removeItem('estudio-last-check');
+      render();
+      return;
+    }
     await refresh();
-  } else {
-    render();
+    localStorage.setItem('estudio-last-check', String(Date.now()));
   }
+  render();
   // Auto-refresh every 5 minutes
   setInterval(silentRefresh, 5 * 60 * 1000);
+  // Chequeo de expiración cada minuto
+  setInterval(() => {
+    if(!state.apiUrl) return;
+    const now = new Date();
+    const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
+    const lastCheck = parseInt(localStorage.getItem('estudio-last-check') || '0');
+    if(now.getTime() >= hoy20 && lastCheck < hoy20) {
+      state.apiUrl = ''; state.accessCode = ''; state.accessName = '';
+      localStorage.removeItem('estudio-api-url');
+      localStorage.removeItem('estudio-access-code');
+      localStorage.removeItem('estudio-access-name');
+      localStorage.removeItem('estudio-last-check');
+      render();
+    }
+  }, 60 * 1000);
 });
 </script>
 </body>
