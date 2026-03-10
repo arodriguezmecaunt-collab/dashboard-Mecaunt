@@ -372,6 +372,8 @@ async function refresh() {
   try {
     const d = await apiGet(state.apiUrl);
     state.data = d; state.lastSync = new Date(); state.error = '';
+    state.isAdmin = d._isAdmin || false;
+    if(d._userName) state.accessName = d._userName;
   } catch(e) { 
     if(e.message.includes('acceso')) { state.apiUrl=''; state.accessCode=''; localStorage.removeItem('estudio-api-url'); localStorage.removeItem('estudio-access-code'); }
     state.error = 'Error: '+e.message; 
