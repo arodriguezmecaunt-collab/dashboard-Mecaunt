@@ -1388,10 +1388,10 @@ function renderEmpresas(c) {
   if(state.selEmp) { renderEmpresaDetail(c); return; }
   const D=state.data;
   c.append(makeHeader('Empresas ('+D.empresas.length+')',null,[
-    el('button',{className:'btn btn-secondary',onClick:()=>exportXls(sortedEmps().map(e=>[e.nombre,catLabel(e.categoria),catLabel(e.categoria2),e.rut||'',e.claves?.bps||'',e.claves?.dgi||'',e.claves?.anv||'',e.fecha_bce||'',e.carpeta||'',e.notas||'']),['Nombre','Cat.1','Cat.2','RUT','BPS','DGI','ANV','Fecha BCE','Carpeta','Notas'],'empresas.xlsx')},'\u2b07 Exportar'),
+    el('button',{className:'btn btn-secondary',onClick:()=>exportXls(sortedEmps().map(e=>[e.nombre,catLabel(e.categoria),catLabel(e.categoria2),e.rut||'',e.fecha_bce||'',e.carpeta||'',e.notas||'']),['Nombre','Cat.1','Cat.2','RUT','Fecha BCE','Carpeta','Notas'],'empresas.xlsx')},'\u2b07 Exportar'),
     el('button',{className:'btn btn-primary',onClick:()=>{state.modals.addEmp=true;render()}},'\u002b Nueva')
   ]));
-  const si=el('input',{className:'search-input',placeholder:'Buscar por nombre, RUT o BPS...',value:state.search,'data-fid':'search-emp'});
+  const si=el('input',{className:'search-input',placeholder:'Buscar por nombre o RUT...',value:state.search,'data-fid':'search-emp'});
   si.addEventListener('input',e=>{state.search=e.target.value;render()});
 
   // Category filter pills - ordered: general | cede/no cede | otros
@@ -1427,7 +1427,7 @@ function renderEmpresas(c) {
 
   const q=state.search.toLowerCase();
   const filtE=D.empresas.filter(e=>{
-    if(q && !e.nombre.toLowerCase().includes(q) && !(e.rut||'').toLowerCase().includes(q) && !(e.notas||'').toLowerCase().includes(q) && !(e.claves?.bps||'').includes(q)) return false;
+    if(q && !e.nombre.toLowerCase().includes(q) && !(e.rut||'').toLowerCase().includes(q) && !(e.notas||'').toLowerCase().includes(q) && false) return false;
     if(state.filters.empCat==='todos') {
       if((e.categoria||'')==='sin_actividad' || (e.categoria2||'')==='sin_actividad') return false;
     } else {
@@ -1481,7 +1481,7 @@ function renderEmpresas(c) {
       el('td',{style:{fontSize:'12px',color:'#7C3AED',fontWeight:e.fecha_bce?600:400}},e.fecha_bce||'\u2014'),
       el('td',{style:{fontSize:'11px',color:'#64748B',maxWidth:'120px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},e.carpeta||'\u2014'),
       el('td',{style:{fontSize:'12px',color:'#64748B',maxWidth:'150px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},encName||e.encargado||'\u2014'),
-      el('td',{style:{fontSize:'11px',color:'#94A3B8'}},e.claves?.dgi?'\ud83d\udd11':'')
+      el('td',{style:{fontSize:'11px',color:'#94A3B8'}},'')
     );
     tbody.append(tr);
   });
