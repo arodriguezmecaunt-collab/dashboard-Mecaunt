@@ -349,7 +349,7 @@ async function connect(url, code) {
     localStorage.setItem('estudio-access-code', state.accessCode);
     localStorage.setItem('estudio-access-name', state.accessName);
     state.lastSync = new Date(); state.modals = {};
-    localStorage.setItem('estudio-last-check', String(Date.now())); // evitar logout por las 20:00
+    localStorage.setItem('estudio-login-date', new Date().toISOString().slice(0,10));
     // Auto-generate vencimientos for current month on login
     const now = new Date();
     autoGenerate(now.getFullYear(), now.getMonth()+1);
@@ -3755,45 +3755,35 @@ function renderModalAddLicRest(app) {
 document.addEventListener('DOMContentLoaded', async () => {
   state.loading = false;
   if(state.apiUrl && state.accessCode) {
-    // Cierre de sesión diario a las 20:00
-    const lastCheck = parseInt(localStorage.getItem('estudio-last-check') || '0');
-    const now = new Date();
-    const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
-    const hoy0 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
-    const loginFueHoyAntesVeinte = lastCheck >= hoy0 && lastCheck < hoy20;
-    const sessionExpirada = now.getTime() >= hoy20 && loginFueHoyAntesVeinte;
-    if(sessionExpirada) {
+    // Cierre de sesión: si el login fue ayer o antes, expirar
+    const loginDate = localStorage.getItem('estudio-login-date') || '';
+    const todayDate = new Date().toISOString().slice(0,10);
+    if(loginDate && loginDate < todayDate) {
       state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
-      localStorage.removeItem('estudio-last-check');
+      localStorage.removeItem('estudio-login-date');
       render();
       return;
     }
     await refresh();
-    localStorage.setItem('estudio-last-check', String(Date.now()));
   }
   render();
   // Auto-refresh every 10 minutes, solo si el tab está visible
   setInterval(()=>{ if(!document.hidden) silentRefresh(); }, 10 * 60 * 1000);
-  // Chequeo de expiración cada minuto — solo cierra si son las 20:00 hoy y no se chequeó aún hoy
+  // Chequeo cada minuto: cerrar a las 20:00 si el login fue hoy, o si el login fue ayer
   setInterval(() => {
     if(!state.apiUrl || !state.accessCode) return;
     const now = new Date();
-    const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
-    const hoy0 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
-    const lastCheck = parseInt(localStorage.getItem('estudio-last-check') || '0');
-    // Solo cerrar si: son las 20:00+ Y el lastCheck es de HOY antes de las 20:00
-    // (no cerrar si lastCheck es de otro día o de cero — eso significa que el login fue después de las 20:00)
-    const loginFueHoyAntesVeinte = lastCheck >= hoy0 && lastCheck < hoy20;
-    if(now.getTime() >= hoy20 && loginFueHoyAntesVeinte) {
+    const todayDate = now.toISOString().slice(0,10);
+    const loginDate = localStorage.getItem('estudio-login-date') || '';
+    const esDespuesVeinte = now.getHours() >= 20;
+    if((esDespuesVeinte && loginDate === todayDate) || (loginDate && loginDate < todayDate)) {
       state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
-      localStorage.setItem('estudio-last-check', String(Date.now()));
+      localStorage.removeItem('estudio-login-date');
       render();
-    } else {
-      localStorage.setItem('estudio-last-check', String(Date.now()));
     }
   }, 60 * 1000);
 });
