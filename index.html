@@ -582,7 +582,25 @@ function render() {
   );
   app.append(sidebar);
 
-  // Main
+  // FAB — botón flotante acceso rápido nueva tarea
+  const fab = el('button',{
+    title:'Nueva tarea rápida',
+    onClick:()=>{state.modals.addTarea=true;render()},
+    style:{
+      position:'fixed',bottom:'28px',right:'28px',zIndex:900,
+      width:'52px',height:'52px',borderRadius:'16px',
+      background:'linear-gradient(135deg,#4F46E5,#7C3AED)',
+      border:'none',cursor:'pointer',
+      display:'flex',alignItems:'center',justifyContent:'center',
+      fontSize:'26px',color:'#fff',
+      boxShadow:'0 4px 20px rgba(79,70,229,0.45)',
+      transition:'transform .15s, box-shadow .15s',
+      fontFamily:"'DM Sans',sans-serif"
+    }
+  },'＋');
+  fab.addEventListener('mouseenter',()=>{fab.style.transform='scale(1.1)';fab.style.boxShadow='0 6px 28px rgba(79,70,229,0.6)';});
+  fab.addEventListener('mouseleave',()=>{fab.style.transform='scale(1)';fab.style.boxShadow='0 4px 20px rgba(79,70,229,0.45)';});
+  app.append(fab);
   const main = el('div',{className:'main'},el('div',{className:'content'}));
   app.append(main);
   const content = main.firstChild;
