@@ -98,7 +98,7 @@ const el = (tag, attrs={}, ...children) => {
 // State
 let state = {
   data: { empresas:[], vencimientos:[], plantillas:[], tareas:[], empleados:[{id:"e1",nombre:"Admin",color:"#3B82F6"}], horasTrabajadas:[], accesos:[], documentos:[], ausencias:[], comentarios:[], categoriasEmp:[], licencias:[], licPlanificacion:[], licRestringidos:[], licSolicitudes:[] },
-  apiUrl: SCRIPT_URL || sessionStorage.getItem('estudio-api-url') || '',
+  apiUrl: SCRIPT_URL || localStorage.getItem('estudio-api-url') || '',
   accessCode: localStorage.getItem('estudio-access-code') || '',
   accessName: localStorage.getItem('estudio-access-name') || '',
   isAdmin: false,
@@ -343,7 +343,7 @@ async function connect(url, code) {
     state.accessCode = code || state.accessCode;
     const d = await apiGet(url, code);
     state.data = d; state.apiUrl = url;
-    if(!SCRIPT_URL) sessionStorage.setItem('estudio-api-url', url); // only store if not embedded
+    if(!SCRIPT_URL) localStorage.setItem('estudio-api-url', url);
     localStorage.setItem('estudio-access-code', state.accessCode);
     localStorage.setItem('estudio-access-name', state.accessName);
     state.lastSync = new Date(); state.modals = {};
@@ -390,7 +390,7 @@ async function refresh() {
     state.isAdmin = d._isAdmin || false;
     if(d._userName) state.accessName = d._userName;
   } catch(e) { 
-    if(e.message.includes('acceso')) { state.accessCode=''; if(!SCRIPT_URL){state.apiUrl='';sessionStorage.removeItem('estudio-api-url');} localStorage.removeItem('estudio-access-code'); }
+    if(e.message.includes('acceso')) { state.accessCode=''; localStorage.removeItem('estudio-access-code'); }
     state.error = 'Error: '+e.message; 
   }
   state.syncing = false; render();
@@ -569,7 +569,7 @@ function render() {
     el('div',{style:{padding:'12px 10px 20px',display:'flex',flexDirection:'column',gap:'6px'}},
       state.accessName?el('div',{style:{padding:'8px 14px',fontSize:'12px',color:'#94A3B8'}},'\u263a '+state.accessName+(state.isAdmin?' (Admin)':'')):'',
       el('button',{onClick:()=>{state.modals.config=true;render()},style:{width:'100%',padding:'8px',background:'transparent',border:'1px solid #334155',borderRadius:'8px',color:'#64748B',fontSize:'11px',fontWeight:600,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},'Configuracion'),
-      el('button',{onClick:()=>{state.accessCode='';state.accessName='';state.isAdmin=false;if(!SCRIPT_URL){state.apiUrl='';sessionStorage.removeItem('estudio-api-url');}localStorage.removeItem('estudio-access-code');localStorage.removeItem('estudio-access-name');render()},style:{width:'100%',padding:'8px',background:'transparent',border:'1px solid #7F1D1D',borderRadius:'8px',color:'#DC2626',fontSize:'11px',fontWeight:600,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},'Cerrar sesion')
+      el('button',{onClick:()=>{state.accessCode='';state.accessName='';state.isAdmin=false;if(!SCRIPT_URL){state.apiUrl='';localStorage.removeItem('estudio-api-url');}localStorage.removeItem('estudio-access-code');localStorage.removeItem('estudio-access-name');render()},style:{width:'100%',padding:'8px',background:'transparent',border:'1px solid #7F1D1D',borderRadius:'8px',color:'#DC2626',fontSize:'11px',fontWeight:600,cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},'Cerrar sesion')
     )
   );
   app.append(sidebar);
@@ -1568,7 +1568,7 @@ function renderEmpresas(c) {
 
   const q=state.search.toLowerCase();
   const filtE=D.empresas.filter(e=>{
-    if(q && !e.nombre.toLowerCase().includes(q) && !(e.rut||'').toLowerCase().includes(q) && !(e.notas||'').toLowerCase().includes(q) && false) return false;
+    if(q && !e.nombre.toLowerCase().includes(q) && !(e.rut||'').toLowerCase().includes(q) && !(e.notas||'').toLowerCase().includes(q)) return false;
     if(state.filters.empCat==='todos') {
       if((e.categoria||'')==='sin_actividad' || (e.categoria2||'')==='sin_actividad') return false;
     } else {
@@ -2053,8 +2053,10 @@ function renderEmpleadoDetail(c) {
   // Vencimientos asignados
   if(vencAsig.length) {
     const card3=el('div',{style:{background:'#fff',borderRadius:'16px',border:'1px solid #E2E8F0',padding:'28px'}});
-    card3.append(el('h3',{style:{margin:'0 0 16px',fontSize:'16px',fontWeight:700}},'Vencimientos asignados ('+vencAsig.length+')'));
-    vencAsig.sort((a,b)=>(a.venc||'').localeCompare(b.venc||'')).forEach(v=>{
+    const vencSorted=vencAsig.filter(v=>!!v.venc).sort((a,b)=>(a.venc||'').localeCompare(b.venc||''));
+    const vencLimit=100;
+    card3.append(el('h3',{style:{margin:'0 0 16px',fontSize:'16px',fontWeight:700}},'Vencimientos asignados ('+vencSorted.length+')'));
+    vencSorted.slice(0,vencLimit).forEach(v=>{
       const sc=statusColor(v.venc,v.estado);
       const badge=el('span',{className:'badge'},sc.label);badge.style.background=sc.bg;badge.style.color=sc.text;badge.style.border='1px solid '+sc.border;
       const orgS=el('span',{style:{padding:'3px 8px',borderRadius:'5px',fontSize:'11px',fontWeight:700}},v.org);
@@ -2067,6 +2069,7 @@ function renderEmpleadoDetail(c) {
         badge
       ));
     });
+    if(vencSorted.length>vencLimit) card3.append(el('p',{style:{margin:'12px 0 0',fontSize:'12px',color:'#94A3B8',textAlign:'center'}},'... y '+(vencSorted.length-vencLimit)+' más. Usá la sección Tareas para ver todos filtrado por encargado.'));
     c.append(card3);
   }
 }
@@ -3761,8 +3764,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     localStorage.setItem('estudio-last-check', String(Date.now()));
   }
   render();
-  // Auto-refresh every 5 minutes
-  setInterval(silentRefresh, 5 * 60 * 1000);
+  // Auto-refresh every 10 minutes, solo si el tab está visible
+  setInterval(()=>{ if(!document.hidden) silentRefresh(); }, 10 * 60 * 1000);
   // Chequeo de expiración cada minuto
   setInterval(() => {
     if(!state.apiUrl) return;
