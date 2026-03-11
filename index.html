@@ -3766,9 +3766,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   render();
   // Auto-refresh every 10 minutes, solo si el tab está visible
   setInterval(()=>{ if(!document.hidden) silentRefresh(); }, 10 * 60 * 1000);
-  // Chequeo de expiración cada minuto
+  // Chequeo de expiración cada minuto — solo cierra si son las 20:00 hoy y no se chequeó aún hoy
   setInterval(() => {
-    if(!state.apiUrl) return;
+    if(!state.apiUrl || !state.accessCode) return;
     const now = new Date();
     const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
     const lastCheck = parseInt(localStorage.getItem('estudio-last-check') || '0');
@@ -3776,8 +3776,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
-      localStorage.removeItem('estudio-last-check');
+      // Marcar que ya se hizo el chequeo de hoy para no volver a disparar
+      localStorage.setItem('estudio-last-check', String(Date.now()));
       render();
+    } else {
+      // Actualizar lastCheck para que no expire innecesariamente
+      localStorage.setItem('estudio-last-check', String(Date.now()));
     }
   }, 60 * 1000);
 });
