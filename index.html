@@ -155,7 +155,9 @@ async function apiGet(url, code) {
     body: JSON.stringify({ action: 'getAll', _code: c })
   });
   if(!r.ok) throw new Error('HTTP '+r.status);
-  const d = await r.json();
+  const rawText = await r.text();
+  if(rawText.trimStart().startsWith('<')) throw new Error('Respuesta HTML inesperada del servidor (posible redirección de Apps Script)');
+  const d = JSON.parse(rawText);
   if(d.error) throw new Error(d.error);
   d.empresas = (d.empresas||[]).map(e=>{
     const clean = v => (!v || v==='None' || v==='undefined') ? '' : String(v);
