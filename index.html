@@ -390,8 +390,13 @@ async function refresh() {
     state.isAdmin = d._isAdmin || false;
     if(d._userName) state.accessName = d._userName;
   } catch(e) { 
-    if(e.message.includes('acceso')) { state.accessCode=''; localStorage.removeItem('estudio-access-code'); }
-    state.error = 'Error: '+e.message; 
+    // Solo desloguear si el servidor confirma explícitamente que el código es inválido
+    const msg = (e.message||'').toLowerCase();
+    if(msg.includes('invalido') || msg.includes('inválido')) { 
+      state.accessCode=''; localStorage.removeItem('estudio-access-code'); 
+    }
+    state.error = 'Error al sincronizar. Reintentando...'; 
+    setTimeout(()=>{ if(state.error) { state.error=''; render(); } }, 4000);
   }
   state.syncing = false; render();
 }
