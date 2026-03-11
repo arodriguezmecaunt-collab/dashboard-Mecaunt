@@ -349,6 +349,7 @@ async function connect(url, code) {
     localStorage.setItem('estudio-access-code', state.accessCode);
     localStorage.setItem('estudio-access-name', state.accessName);
     state.lastSync = new Date(); state.modals = {};
+    localStorage.setItem('estudio-last-check', String(Date.now())); // evitar logout por las 20:00
     // Auto-generate vencimientos for current month on login
     const now = new Date();
     autoGenerate(now.getFullYear(), now.getMonth()+1);
@@ -3758,7 +3759,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const lastCheck = parseInt(localStorage.getItem('estudio-last-check') || '0');
     const now = new Date();
     const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
-    const sessionExpirada = now.getTime() >= hoy20 && lastCheck < hoy20;
+    const hoy0 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
+    const loginFueHoyAntesVeinte = lastCheck >= hoy0 && lastCheck < hoy20;
+    const sessionExpirada = now.getTime() >= hoy20 && loginFueHoyAntesVeinte;
     if(sessionExpirada) {
       state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
@@ -3778,16 +3781,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if(!state.apiUrl || !state.accessCode) return;
     const now = new Date();
     const hoy20 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0).getTime();
+    const hoy0 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
     const lastCheck = parseInt(localStorage.getItem('estudio-last-check') || '0');
-    if(now.getTime() >= hoy20 && lastCheck < hoy20) {
+    // Solo cerrar si: son las 20:00+ Y el lastCheck es de HOY antes de las 20:00
+    // (no cerrar si lastCheck es de otro día o de cero — eso significa que el login fue después de las 20:00)
+    const loginFueHoyAntesVeinte = lastCheck >= hoy0 && lastCheck < hoy20;
+    if(now.getTime() >= hoy20 && loginFueHoyAntesVeinte) {
       state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
-      // Marcar que ya se hizo el chequeo de hoy para no volver a disparar
       localStorage.setItem('estudio-last-check', String(Date.now()));
       render();
     } else {
-      // Actualizar lastCheck para que no expire innecesariamente
       localStorage.setItem('estudio-last-check', String(Date.now()));
     }
   }, 60 * 1000);
