@@ -119,6 +119,7 @@ let state = {
 const fmt = d => { if(!d) return ''; const p = String(d).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : String(d); };
 const _now = new Date();
 const todayStr = _now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0')+'-'+String(_now.getDate()).padStart(2,'0');
+const localDate = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 function tomorrowStr(){const t=new Date(_now);t.setDate(t.getDate()+1);return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');}
 const daysUntil = ds => Math.ceil((new Date(ds+'T00:00:00') - new Date(todayStr+'T00:00:00')) / 86400000);
 const empName = id => state.data.empresas.find(e=>e.id===id)?.nombre || '\u2014';
@@ -349,7 +350,7 @@ async function connect(url, code) {
     localStorage.setItem('estudio-access-code', state.accessCode);
     localStorage.setItem('estudio-access-name', state.accessName);
     state.lastSync = new Date(); state.modals = {};
-    localStorage.setItem('estudio-login-date', new Date().toISOString().slice(0,10));
+    localStorage.setItem('estudio-login-date', todayStr);
     // Auto-generate vencimientos for current month on login
     const now = new Date();
     autoGenerate(now.getFullYear(), now.getMonth()+1);
@@ -684,7 +685,7 @@ function makeStats(items) {
 function renderHome(c) {
   const D = state.data;
   const hoy = todayStr;
-  const manana = new Date(new Date().getTime()+86400000).toISOString().split('T')[0];
+  const manana = new Date(new Date().getTime()+86400000); const mananaStr = localDate(manana);
   const empDepto = id => (D.empleados.find(e=>e.id===id)||{}).departamento||'';
   const myDept = myDepto();
   const forcedDept = (!state.isAdmin && myDept) ? myDept : null;
@@ -700,7 +701,7 @@ function renderHome(c) {
 
   // Vencimientos hoy/manana (filtered by dept + mine)
   const vHoy = D.vencimientos.filter(v=>v.venc===hoy&&v.estado!=='completado'&&matchDept(v)&&matchMe(v));
-  const vManana = D.vencimientos.filter(v=>v.venc===manana&&v.estado!=='completado'&&matchDept(v)&&matchMe(v));
+  const vManana = D.vencimientos.filter(v=>v.venc===mananaStr&&v.estado!=='completado'&&matchDept(v)&&matchMe(v));
   const vVencidos = D.vencimientos.filter(v=>v.estado!=='completado'&&daysUntil(v.venc)<0&&matchDept(v)&&matchMe(v));
   const vProx7 = D.vencimientos.filter(v=>v.estado!=='completado'&&daysUntil(v.venc)>=0&&daysUntil(v.venc)<=7&&matchDept(v)&&matchMe(v));
 
@@ -2740,7 +2741,7 @@ function doComplete(info, minutes, desc, quien, tipo) {
       const d = new Date(item.fechaLimite+'T00:00:00');
       if(item.recurrencia==='mensual') d.setMonth(d.getMonth()+1);
       else if(item.recurrencia==='anual') d.setFullYear(d.getFullYear()+1);
-      nextFecha = d.toISOString().slice(0,10);
+      nextFecha = localDate(d);
     }
     const nextT = {
       id:'t'+Date.now()+Math.random().toString(36).slice(2,5),
@@ -3549,7 +3550,7 @@ function aprobarSolicitud(s) {
     dias:String(-dias),
     saldoResultante:String(nuevoSaldo),
     ingreso:'',
-    fechaCreacion:new Date().toISOString().slice(0,10)
+    fechaCreacion:todayStr
   };
   if(!state.data.licencias) state.data.licencias=[];
   state.data.licencias.push(mov);
@@ -3605,7 +3606,7 @@ function renderModalLicSolicitud(app) {
       let dias=1;
       try{const[d1,m1,y1]=desde.split('/').map(Number);const[d2,m2,y2]=hasta.split('/').map(Number);dias=Math.max(1,Math.round((new Date(y2,m2-1,d2)-new Date(y1,m1-1,d1))/(864e5))+1);}catch(e){}
       const emp=empleados.find(e=>e.id===myId);
-      const sol={id:'sol'+Date.now(),empleadoId:myId,empleadoNombre:emp?emp.nombre:myId,tipo,año,fechaDesde:desde,fechaHasta:hasta,dias:String(dias),estado:'pendiente',motivoRechazo:'',fechaCreacion:new Date().toISOString().slice(0,10)};
+      const sol={id:'sol'+Date.now(),empleadoId:myId,empleadoNombre:emp?emp.nombre:myId,tipo,año,fechaDesde:desde,fechaHasta:hasta,dias:String(dias),estado:'pendiente',motivoRechazo:'',fechaCreacion:todayStr};
       if(!state.data.licSolicitudes)state.data.licSolicitudes=[];
       state.data.licSolicitudes.push(sol);
       apiPost({action:'add',sheet:'LicSolicitudes',data:sol});
@@ -3646,7 +3647,7 @@ function renderModalAgregarDias(app, preEmpId) {
       const movs=(state.data.licencias||[]).filter(m=>m.empleadoId===empId&&m.tipo===tipo);
       const saldo=movs.length?Number(movs[movs.length-1].saldoResultante)||0:0;
       const nuevoSaldo=saldo+dias;
-      const mov={id:'lic'+Date.now(),empleadoId:empId,tipo,año,descripcion:'Días acreditados',fecha:new Date().toLocaleDateString('es-AR'),dias:String(dias),saldoResultante:String(nuevoSaldo),ingreso:'',fechaCreacion:new Date().toISOString().slice(0,10)};
+      const mov={id:'lic'+Date.now(),empleadoId:empId,tipo,año,descripcion:'Días acreditados',fecha:new Date().toLocaleDateString('es-AR'),dias:String(dias),saldoResultante:String(nuevoSaldo),ingreso:'',fechaCreacion:todayStr};
       if(!state.data.licencias)state.data.licencias=[];
       state.data.licencias.push(mov);
       apiPost({action:'add',sheet:'Licencias',data:mov});
@@ -3693,7 +3694,7 @@ function renderModalAddLicMov(app, preEmpId) {
       const dias=Number(diasStr);if(isNaN(dias)){alert('Días debe ser un número');return;}
       const movs=(state.data.licencias||[]).filter(m=>m.empleadoId===empId&&m.tipo===tipo);
       const saldo=movs.length?Number(movs[movs.length-1].saldoResultante)||0:0;
-      const mov={id:'lic'+Date.now(),empleadoId:empId,tipo,año,descripcion:desc,fecha,dias:String(dias),saldoResultante:String(saldo+dias),ingreso:fIngreso._input.value.trim(),fechaCreacion:new Date().toISOString().slice(0,10)};
+      const mov={id:'lic'+Date.now(),empleadoId:empId,tipo,año,descripcion:desc,fecha,dias:String(dias),saldoResultante:String(saldo+dias),ingreso:fIngreso._input.value.trim(),fechaCreacion:todayStr};
       state.data.licencias.push(mov);
       apiPost({action:'add',sheet:'Licencias',data:mov});
       state.modals.addLicMov=null;state.licTab='saldos';render();
@@ -3775,7 +3776,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if(state.apiUrl && state.accessCode) {
     // Cierre de sesión: si el login fue ayer o antes, expirar
     const loginDate = localStorage.getItem('estudio-login-date') || '';
-    const todayDate = new Date().toISOString().slice(0,10);
+    const todayDate = todayStr;
     if(loginDate && loginDate < todayDate) {
       state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
@@ -3793,7 +3794,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(() => {
     if(!state.apiUrl || !state.accessCode) return;
     const now = new Date();
-    const todayDate = now.toISOString().slice(0,10);
+    const todayDate = localDate(now);
     const loginDate = localStorage.getItem('estudio-login-date') || '';
     const esDespuesVeinte = now.getHours() >= 20;
     if((esDespuesVeinte && loginDate === todayDate) || (loginDate && loginDate < todayDate)) {
