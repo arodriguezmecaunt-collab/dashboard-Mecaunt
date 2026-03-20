@@ -204,25 +204,39 @@ const mesNum = {'enero':1,'febrero':2,'marzo':3,'abril':4,'mayo':5,'junio':6,'ju
 const dgiCede2026   = [0,22,23,23,22,22,22,22,24,22,22,23,22];
 const dgiNoCede2026 = [0,26,25,25,27,25,25,27,26,25,26,25,28];
 
-// Auto-generate vencimientos for a given month from plantillas + DJ from fecha_bce
+// Auto-generate vencimientos/tareas for a given month from plantillas + DJ from fecha_bce
 async function autoGenerate(year, month) {
   const prefix = year+'-'+pad2(month);
   const existing = state.data.vencimientos.filter(v=>(v.venc||'').startsWith(prefix));
   const newVencs = [];
+  const newTareas = [];
 
-  // 1. Generate from plantillas (por plantilla individual, para poder completar meses parciales)
+  // 1. Generate from plantillas
   const plantillas = state.data.plantillas||[];
   const maxDay = lastDay(year, month);
   plantillas.forEach(p => {
-    // Mensual: genera todos los meses. Anual: solo genera en el mes indicado
     const freq = p.frecuencia || 'mensual';
     if(freq === 'anual') {
       const mesPl = Number(p.mes)||0;
-      if(mesPl !== month) return; // solo en el mes correcto
+      if(mesPl !== month) return;
     }
     const dia = Math.min(Number(p.dia)||1, maxDay);
-    const fechaVenc = prefix+'-'+pad2(dia);
-    // Chequear si ya existe un vencimiento para esta plantilla en este mes
+    const fechaLimite = prefix+'-'+pad2(dia);
+
+    // TIPO TAREA
+    if(p.tipoplantilla === 'tarea') {
+      const yaExiste = (state.data.tareas||[]).some(t =>
+        (t.titulo||'').trim().toUpperCase() === (p.obligacion||'').trim().toUpperCase() &&
+        (t.encargadoId||'') === (p.encargadoId||'') &&
+        (t.fechaLimite||'').startsWith(prefix)
+      );
+      if(yaExiste) return;
+      newTareas.push({id:'t'+Date.now()+Math.random().toString(36).slice(2,6), titulo:p.obligacion, descripcion:'Generada automáticamente desde plantilla', empresaId:p.empresaId||'', encargadoId:p.encargadoId||'', encargadoId2:p.encargadoId2||'', fechaLimite, prioridad:p.prioridad||'media', estado:'pendiente', tick1:'', tick2:'', cadenaDesc:'', cadenaEncargadoId:'', cadenaPadreId:'', fechaCreacion:prefix+'-01'});
+      return;
+    }
+
+    // TIPO VENCIMIENTO (default)
+    const fechaVenc = fechaLimite;
     const yaExiste = existing.some(v =>
       String(v.empresaId) === String(p.empresaId) &&
       String(v.org) === String(p.org) &&
@@ -266,13 +280,17 @@ async function autoGenerate(year, month) {
     newVencs.push({id:'vdj'+Date.now()+Math.random().toString(36).slice(2,6), empresaId:emp.id, venc:djPrefix+'-'+pad2(dia), org:'DGI', obligacion:'Vencimiento DJ '+emp.nombre, estado:'pendiente', encargadoId:'', encargadoId2:'', tick1:'', tick2:''});
   });
 
-  if(!newVencs.length) return;
-  state.data.vencimientos.push(...newVencs);
+  if(!newVencs.length && !newTareas.length) return;
+  if(newVencs.length) state.data.vencimientos.push(...newVencs);
+  if(newTareas.length) { if(!state.data.tareas) state.data.tareas=[]; state.data.tareas.push(...newTareas); }
   render();
   // Save in background without blocking
   (async()=>{
     for(const v of newVencs) {
       await apiPost({action:'add',sheet:'Vencimientos',data:v});
+    }
+    for(const t of newTareas) {
+      await apiPost({action:'add',sheet:'Tareas',data:t});
     }
   })();
 }
@@ -363,7 +381,7 @@ async function connect(url, code) {
     localStorage.setItem('estudio-login-hour', String(new Date().getHours()));
     // Auto-generate vencimientos for current month on login
     const now = new Date();
-    autoGenerate(now.getFullYear(), now.getMonth()+1);
+    await autoGenerate(now.getFullYear(), now.getMonth()+1);
     // Si el Apps Script es viejo y no devuelve licencias, las buscamos por separado
     if(!d.licencias || d.licencias.length === 0) fetchLicenciasSheets();
   } catch(e) { state.error = 'Error: '+e.message; }
@@ -2270,11 +2288,13 @@ function renderPlantillas(c) {
       color: p.frecuencia==='anual'?'#B45309':'#4F46E5'}},
       p.frecuencia==='anual'?('📅 Anual '+(p.mes?mesesNombre[Number(p.mes)]:'')):'🔁 Mensual'
     );
+    const tipoBadge = el('span',{style:{padding:'3px 8px',borderRadius:'5px',fontSize:'11px',fontWeight:700,background:orgC(p.org||'').bg,color:orgC(p.org||'').text}},p.org||'—');
+    const empresaCol = el('td',{style:{fontWeight:600,color:'#0F172A',maxWidth:'220px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},empName(p.empresaId));
 
     tbody.append(el('tr',{},
       el('td',{style:{fontWeight:700,fontFamily:"'DM Mono',monospace",fontSize:'15px',color:'#4F46E5',textAlign:'center',width:'60px'}},String(p.dia)),
-      el('td',{style:{fontWeight:600,color:'#0F172A',maxWidth:'220px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},empName(p.empresaId)),
-      el('td',{},orgSpan),
+      empresaCol,
+      el('td',{},tipoBadge),
       el('td',{style:{color:'#475569',maxWidth:'280px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},p.obligacion),
       el('td',{},freqBadge),
       el('td',{},encSelect),
@@ -2456,7 +2476,7 @@ function renderModalPlantilla(app) {
   empWrap.append(empSearch,empList);
 
   const f3=makeFormField('Organismo','select',{selected:'DGI',options:[{value:'DGI',label:'DGI'},{value:'BPS',label:'BPS'},{value:'ANV',label:'ANV'},{value:'CONTAB.',label:'CONTAB.'},{value:'SUELDOS',label:'SUELDOS'}]});
-  const f4=makeFormField('Obligacion','text','','Ej: DJ IVA mensual');
+  const f4=makeFormField('Obligacion / Tarea','text','','Ej: DJ IVA mensual, Revisar sueldos, etc.');
   const f5=makeFormField('Encargado 1','select',{selected:'',options:[{value:'',label:'Sin asignar'},...state.data.empleados.map(e=>({value:e.id,label:e.nombre}))]});
   const f5b=makeFormField('Encargado 2 (opcional)','select',{selected:'',options:[{value:'',label:'Ninguno'},...state.data.empleados.map(e=>({value:e.id,label:e.nombre}))]});
   const fFreq=makeFormField('Frecuencia','select',{selected:'mensual',options:[{value:'mensual',label:'🔁 Mensual (todos los meses)'},{value:'anual',label:'📅 Anual (una vez por año)'}]});
@@ -2464,40 +2484,52 @@ function renderModalPlantilla(app) {
   const fMes=makeFormField('Mes del año','select',{selected:String(new Date().getMonth()+1),options:mesesOpts});
   fMes.style.display='none';
   fFreq._input.addEventListener('change',()=>{ fMes.style.display=fFreq._input.value==='anual'?'block':'none'; });
+
   const btns=el('div',{style:{display:'flex',gap:'10px',justifyContent:'flex-end'}},
     el('button',{className:'btn btn-secondary',onClick:()=>{state.modals={};render()}},'Cancelar'),
     el('button',{className:'btn btn-primary',onClick:async()=>{
-      const dia=f1._input.value,org=f3._input.value,obligacion=f4._input.value,encargadoId=f5._input.value,encargadoId2=f5b._input.value;
-      const frecuencia=fFreq._input.value, mes=fFreq._input.value==='anual'?fMes._input.value:'';
-      if(!dia||!selectedEmps.size||!obligacion) return;
+      const dia=f1._input.value, org=f3._input.value, obligacion=f4._input.value.trim();
+      const encargadoId=f5._input.value, encargadoId2=f5b._input.value;
+      const frecuencia=fFreq._input.value, mes=frecuencia==='anual'?fMes._input.value:'';
+      if(!dia) { alert('Ingresá el día del mes'); return; }
+      if(!selectedEmps.size) { alert('Seleccioná al menos una empresa'); return; }
+      if(!obligacion) { alert('Ingresá la obligación'); return; }
+
       const nowM=new Date().getMonth()+1, nowY=new Date().getFullYear();
       const pfx=nowY+'-'+pad2(nowM);
       const maxD=lastDay(nowY,nowM);
       const d2=Math.min(Number(dia),maxD);
+      const generar = frecuencia==='mensual' || (frecuencia==='anual' && String(nowM)===String(mes));
+
       for(const empresaId of selectedEmps) {
-        const p={id:'pl'+Date.now()+Math.random().toString(36).slice(2,6),dia:String(dia),empresaId,org,obligacion,encargadoId,encargadoId2,frecuencia,mes};
+        const p={id:'pl'+Date.now()+Math.random().toString(36).slice(2,6), tipoplantilla:'vencimiento', dia:String(dia), empresaId, org, obligacion, encargadoId, encargadoId2, frecuencia, mes};
         if(!state.data.plantillas) state.data.plantillas=[];
         state.data.plantillas.push(p);
         await apiPost({action:'add',sheet:'Plantillas',data:p});
-        // Genera vencimiento para el mes actual si corresponde
-        const generar = frecuencia==='mensual' || (frecuencia==='anual' && String(nowM)===String(mes));
+
+        // Generar vencimiento para el mes actual inmediatamente
         if(generar) {
           const yaExiste = state.data.vencimientos.some(v =>
-            String(v.empresaId) === String(empresaId) && v.org === org &&
-            (v.obligacion||'').trim().toUpperCase() === (obligacion||'').trim().toUpperCase() &&
+            String(v.empresaId)===String(empresaId) && v.org===org &&
+            (v.obligacion||'').trim().toUpperCase()===(obligacion).trim().toUpperCase() &&
             (v.venc||'').startsWith(pfx)
           );
           if(!yaExiste) {
-            const v={id:'v'+Date.now()+Math.random().toString(36).slice(2,6),empresaId,venc:pfx+'-'+pad2(d2),org,obligacion,estado:'pendiente',encargadoId,encargadoId2,tick1:'',tick2:''};
+            const v={id:'v'+Date.now()+Math.random().toString(36).slice(2,6), empresaId, venc:pfx+'-'+pad2(d2), org, obligacion, estado:'pendiente', encargadoId, encargadoId2, tick1:'', tick2:''};
             state.data.vencimientos.push(v);
             await apiPost({action:'add',sheet:'Vencimientos',data:v});
           }
         }
       }
-      state.modals={};render();
+      state.modals={};
+      showNotif('✅ Plantilla creada. Se generará automáticamente cada mes.');
+      render();
     }},'Crear Plantilla')
   );
-  makeModal('Nueva Plantilla Recurrente',[f1,empWrap,f3,f4,f5,f5b,fFreq,fMes,btns],app);
+  makeModal('Nueva Plantilla Recurrente',[
+    el('div',{style:{background:'#EEF2FF',border:'1px solid #C7D2FE',borderRadius:'10px',padding:'12px',marginBottom:'16px',fontSize:'12px',color:'#4338CA',lineHeight:'1.6'}},'Cada mes al entrar al sistema, se genera automáticamente un vencimiento con este encargado asignado. Si es para Bautista, elegí la empresa, ponés el día y lo asignás a él.'),
+    f1, empWrap, f3, f4, f5, f5b, fFreq, fMes, btns
+  ],app);
 }
 
 function renderModalVenc(app) {
