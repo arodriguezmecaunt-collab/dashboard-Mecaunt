@@ -360,6 +360,7 @@ async function connect(url, code) {
     localStorage.setItem('estudio-access-name', state.accessName);
     state.lastSync = new Date(); state.modals = {};
     localStorage.setItem('estudio-login-date', new Date().toISOString().slice(0,10));
+    localStorage.setItem('estudio-login-hour', String(new Date().getHours()));
     // Auto-generate vencimientos for current month on login
     const now = new Date();
     autoGenerate(now.getFullYear(), now.getMonth()+1);
@@ -3613,7 +3614,7 @@ function renderModalLicSolicitud(app) {
       const tipo=fTipo._input.value,año=fAño._input.value.trim(),desde=fDesde._input.value.trim(),hasta=fHasta._input.value.trim()||desde;
       if(!desde){alert('Ingresá la fecha desde');return;}
       let dias=1;
-      try{const[d1,m1,y1]=desde.split('/').map(Number);const[d2,m2,y2]=hasta.split('/').map(Number);let cur=new Date(y1,m1-1,d1),end=new Date(y2,m2-1,d2);dias=0;while(cur<=end){if(cur.getDay()!==0)dias++;cur=new Date(cur.getTime()+864e5);}dias=Math.max(1,dias);}catch(e){}
+      try{const[d1,m1,y1]=desde.split('/').map(Number);const[d2,m2,y2]=hasta.split('/').map(Number);dias=Math.max(1,Math.round((new Date(y2,m2-1,d2)-new Date(y1,m1-1,d1))/(864e5))+1);}catch(e){}
       const emp=empleados.find(e=>e.id===myId);
       const sol={id:'sol'+Date.now(),empleadoId:myId,empleadoNombre:emp?emp.nombre:myId,tipo,año,fechaDesde:desde,fechaHasta:hasta,dias:String(dias),estado:'pendiente',motivoRechazo:'',fechaCreacion:new Date().toISOString().slice(0,10)};
       if(!state.data.licSolicitudes)state.data.licSolicitudes=[];
@@ -3805,8 +3806,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const now = new Date();
     const todayDate = now.toISOString().slice(0,10);
     const loginDate = localStorage.getItem('estudio-login-date') || '';
+    const loginHour = parseInt(localStorage.getItem('estudio-login-hour') || '0');
     const esDespuesVeinte = now.getHours() >= 20;
-    if((esDespuesVeinte && loginDate === todayDate) || (loginDate && loginDate < todayDate)) {
+    if((esDespuesVeinte && loginDate === todayDate && loginHour < 20) || (loginDate && loginDate < todayDate)) {
       state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
