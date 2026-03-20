@@ -3824,6 +3824,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
       localStorage.removeItem('estudio-login-date');
+      localStorage.removeItem('estudio-login-hour');
       render();
       return;
     }
@@ -3832,19 +3833,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   render();
   // Auto-refresh every 10 minutes, solo si el tab está visible
   setInterval(()=>{ if(!document.hidden) silentRefresh(); }, 10 * 60 * 1000);
-  // Chequeo cada minuto: cerrar a las 20:00 si el login fue hoy, o si el login fue ayer
+  // Chequeo cada minuto: cerrar a las 20:00 SOLO si el usuario entró antes de las 20:00
   setInterval(() => {
     if(!state.apiUrl || !state.accessCode) return;
     const now = new Date();
     const todayDate = now.toISOString().slice(0,10);
     const loginDate = localStorage.getItem('estudio-login-date') || '';
-    const loginHour = parseInt(localStorage.getItem('estudio-login-hour') || '0');
-    const esDespuesVeinte = now.getHours() >= 20;
-    if((esDespuesVeinte && loginDate === todayDate && loginHour < 20) || (loginDate && loginDate < todayDate)) {
+    const loginHour = parseInt(localStorage.getItem('estudio-login-hour') ?? '25');
+    // Solo cerrar si: son las 20+ Y el login de hoy fue antes de las 20
+    const cerrarPorHora = now.getHours() >= 20 && loginDate === todayDate && loginHour < 20;
+    // Cerrar si el login fue de un día anterior (ya expiró)
+    const cerrarPorDia = loginDate !== '' && loginDate < todayDate;
+    if(cerrarPorHora || cerrarPorDia) {
       state.accessCode = ''; state.accessName = ''; state.isAdmin = false;
       localStorage.removeItem('estudio-access-code');
       localStorage.removeItem('estudio-access-name');
       localStorage.removeItem('estudio-login-date');
+      localStorage.removeItem('estudio-login-hour');
       render();
     }
   }, 60 * 1000);
