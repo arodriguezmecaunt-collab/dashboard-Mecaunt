@@ -1792,10 +1792,30 @@ function renderEmpresaDetail(c) {
   card1.append(el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:'16px',marginBottom:'20px'}},
     makeField('Ubicacion Carpeta Fisica',emp.carpeta,v=>{emp.carpeta=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{carpeta:v}})})
   ));
-  const notesArea=el('textarea',{style:{width:'100%',minHeight:'60px',padding:'8px 12px',border:'1px solid #E2E8F0',borderRadius:'8px',fontSize:'13px',fontFamily:"'DM Sans',sans-serif",marginTop:'4px',resize:'vertical',boxSizing:'border-box'}});
+  const notesWrap=el('div',{});
+  notesWrap.append(el('label',{style:{fontSize:'11px',fontWeight:600,color:'#94A3B8',textTransform:'uppercase'}},'Notas'));
+  const notesArea=el('textarea',{style:{width:'100%',minHeight:'80px',padding:'8px 12px',border:'1px solid #E2E8F0',borderRadius:'8px',fontSize:'13px',fontFamily:"'DM Sans',sans-serif",marginTop:'4px',resize:'vertical',boxSizing:'border-box'}});
   notesArea.value=emp.notas||'';
-  notesArea.addEventListener('change',e=>{emp.notas=e.target.value;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{notas:e.target.value}})});
-  card1.append(el('div',{},el('label',{style:{fontSize:'11px',fontWeight:600,color:'#94A3B8',textTransform:'uppercase'}},'Notas'),notesArea));
+  const notesSaveBtn=el('button',{style:{marginTop:'8px',padding:'6px 16px',fontSize:'12px',fontWeight:600,background:'#4F46E5',color:'#fff',border:'none',borderRadius:'8px',cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},'💾 Guardar notas');
+  const notesStatus=el('span',{style:{marginLeft:'10px',fontSize:'12px',color:'#94A3B8'}},emp.notas?'Cargado desde BD':'Sin notas guardadas');
+  notesArea.addEventListener('input',e=>{
+    emp.notas=e.target.value;
+    notesStatus.textContent='Sin guardar...';
+    notesStatus.style.color='#D97706';
+  });
+  notesSaveBtn.addEventListener('click',async()=>{
+    notesSaveBtn.disabled=true;
+    notesSaveBtn.textContent='Guardando...';
+    await apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{notas:notesArea.value}});
+    emp.notas=notesArea.value;
+    notesStatus.textContent='✅ Guardado';
+    notesStatus.style.color='#059669';
+    notesSaveBtn.disabled=false;
+    notesSaveBtn.textContent='💾 Guardar notas';
+  });
+  notesWrap.append(notesArea);
+  notesWrap.append(el('div',{style:{display:'flex',alignItems:'center',marginTop:'4px'}},notesSaveBtn,notesStatus));
+  card1.append(notesWrap);
   c.append(card1);
 
   // Documentos
@@ -2085,10 +2105,27 @@ function renderEmpleadoDetail(c) {
   // Notas
   const notasWrap=el('div',{});
   notasWrap.append(el('label',{style:{fontSize:'11px',fontWeight:600,color:'#94A3B8',textTransform:'uppercase'}},'Notas'));
-  const notasArea=el('textarea',{placeholder:'Notas sobre este integrante...',style:{width:'100%',minHeight:'60px',padding:'8px 12px',border:'1px solid #E2E8F0',borderRadius:'8px',fontSize:'13px',fontFamily:"'DM Sans',sans-serif",marginTop:'4px',resize:'vertical',boxSizing:'border-box'}});
+  const notasArea=el('textarea',{placeholder:'Notas sobre este integrante...',style:{width:'100%',minHeight:'80px',padding:'8px 12px',border:'1px solid #E2E8F0',borderRadius:'8px',fontSize:'13px',fontFamily:"'DM Sans',sans-serif",marginTop:'4px',resize:'vertical',boxSizing:'border-box'}});
   notasArea.value=emp.notas||'';
-  notasArea.addEventListener('change',e=>{emp.notas=e.target.value;apiPost({action:'update',sheet:'Empleados',id:emp.id,data:{notas:e.target.value}})});
+  const notasSaveBtn=el('button',{style:{marginTop:'8px',padding:'6px 16px',fontSize:'12px',fontWeight:600,background:'#4F46E5',color:'#fff',border:'none',borderRadius:'8px',cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}},'💾 Guardar notas');
+  const notasStatus=el('span',{style:{marginLeft:'10px',fontSize:'12px',color:'#94A3B8'}},emp.notas?'Cargado desde BD':'Sin notas guardadas');
+  notasArea.addEventListener('input',e=>{
+    emp.notas=e.target.value;
+    notasStatus.textContent='Sin guardar...';
+    notasStatus.style.color='#D97706';
+  });
+  notasSaveBtn.addEventListener('click',async()=>{
+    notasSaveBtn.disabled=true;
+    notasSaveBtn.textContent='Guardando...';
+    await apiPost({action:'update',sheet:'Empleados',id:emp.id,data:{notas:notasArea.value}});
+    emp.notas=notasArea.value;
+    notasStatus.textContent='✅ Guardado';
+    notasStatus.style.color='#059669';
+    notasSaveBtn.disabled=false;
+    notasSaveBtn.textContent='💾 Guardar notas';
+  });
   notasWrap.append(notasArea);
+  notasWrap.append(el('div',{style:{display:'flex',alignItems:'center',marginTop:'4px'}},notasSaveBtn,notasStatus));
   card1.append(notasWrap);
 
   c.append(card1);
