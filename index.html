@@ -89,6 +89,7 @@ const el = (tag, attrs={}, ...children) => {
     else if (k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'className') e.className = v;
     else if (k === 'innerHTML') e.innerHTML = v;
+    else if (k === 'value') e.value = v;
     else e.setAttribute(k, v);
   }
   children.flat(Infinity).forEach(c => { if (c != null) e.append(typeof c === 'string' ? c : c); });
@@ -654,6 +655,7 @@ function render() {
   if(state.modals.addTarea) renderModalTarea(app);
   if(state.modals.addAcceso) renderModalAcceso(app);
   if(state.modals.addAusencia) renderModalAusencia(app);
+  if(state.modals.editAusencia) renderModalEditAusencia(app, state.modals.editAusencia);
   if(state.modals.completar) renderModalCompletar(app);
   if(state.modals.comentario) renderModalComentario(app);
   if(state.modals.editCadena) renderModalEditCadena(app);
@@ -1790,7 +1792,8 @@ function renderEmpresaDetail(c) {
   card1.append(el('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:'16px',marginBottom:'20px'}},
     makeField('Ubicacion Carpeta Fisica',emp.carpeta,v=>{emp.carpeta=v;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{carpeta:v}})})
   ));
-  const notesArea=el('textarea',{value:emp.notas||'',style:{width:'100%',minHeight:'60px',padding:'8px 12px',border:'1px solid #E2E8F0',borderRadius:'8px',fontSize:'13px',fontFamily:"'DM Sans',sans-serif",marginTop:'4px',resize:'vertical',boxSizing:'border-box'}});
+  const notesArea=el('textarea',{style:{width:'100%',minHeight:'60px',padding:'8px 12px',border:'1px solid #E2E8F0',borderRadius:'8px',fontSize:'13px',fontFamily:"'DM Sans',sans-serif",marginTop:'4px',resize:'vertical',boxSizing:'border-box'}});
+  notesArea.value=emp.notas||'';
   notesArea.addEventListener('change',e=>{emp.notas=e.target.value;apiPost({action:'update',sheet:'Empresas',id:emp.id,data:{notas:e.target.value}})});
   card1.append(el('div',{},el('label',{style:{fontSize:'11px',fontWeight:600,color:'#94A3B8',textTransform:'uppercase'}},'Notas'),notesArea));
   c.append(card1);
@@ -2082,7 +2085,8 @@ function renderEmpleadoDetail(c) {
   // Notas
   const notasWrap=el('div',{});
   notasWrap.append(el('label',{style:{fontSize:'11px',fontWeight:600,color:'#94A3B8',textTransform:'uppercase'}},'Notas'));
-  const notasArea=el('textarea',{value:emp.notas||'',placeholder:'Notas sobre este integrante...',style:{width:'100%',minHeight:'60px',padding:'8px 12px',border:'1px solid #E2E8F0',borderRadius:'8px',fontSize:'13px',fontFamily:"'DM Sans',sans-serif",marginTop:'4px',resize:'vertical',boxSizing:'border-box'}});
+  const notasArea=el('textarea',{placeholder:'Notas sobre este integrante...',style:{width:'100%',minHeight:'60px',padding:'8px 12px',border:'1px solid #E2E8F0',borderRadius:'8px',fontSize:'13px',fontFamily:"'DM Sans',sans-serif",marginTop:'4px',resize:'vertical',boxSizing:'border-box'}});
+  notasArea.value=emp.notas||'';
   notasArea.addEventListener('change',e=>{emp.notas=e.target.value;apiPost({action:'update',sheet:'Empleados',id:emp.id,data:{notas:e.target.value}})});
   notasWrap.append(notasArea);
   card1.append(notasWrap);
@@ -2151,7 +2155,8 @@ function makeFormField(label,type,value,ph) {
     value.options.forEach(o=>{const op=el('option',{value:o.value},o.label);if(value.selected===o.value)op.selected=true;sel.append(op)});
     wrap.append(sel); wrap._input=sel;
   } else if(type==='textarea') {
-    const ta=el('textarea',{value:value||'',placeholder:ph||'',style:{width:'100%',minHeight:'60px',padding:'10px 14px',border:'2px solid #E2E8F0',borderRadius:'10px',fontSize:'14px',fontFamily:"'DM Sans',sans-serif",outline:'none',resize:'vertical',boxSizing:'border-box',background:'#FAFBFC'}});
+    const ta=el('textarea',{placeholder:ph||'',style:{width:'100%',minHeight:'60px',padding:'10px 14px',border:'2px solid #E2E8F0',borderRadius:'10px',fontSize:'14px',fontFamily:"'DM Sans',sans-serif",outline:'none',resize:'vertical',boxSizing:'border-box',background:'#FAFBFC'}});
+    ta.value=value||'';
     wrap.append(ta); wrap._input=ta;
   } else {
     const inp=el('input',{type:type||'text',value:value||'',placeholder:ph||'',className:'input'});
@@ -2811,6 +2816,36 @@ function doComplete(info, minutes, desc, quien, tipo) {
 }
 
 // ===== AUSENCIAS =====
+function renderModalEditAusencia(app, ausencia) {
+  const f0=makeFormField('Tipo','select',{selected:(!ausencia.cantHoras||ausencia.cantHoras==='8')?'dia':'horas',options:[{value:'dia',label:'Dia completo'},{value:'horas',label:'Algunas horas'}]});
+  const f0b=makeFormField('Cantidad de horas','number',ausencia.cantHoras||'2','Ej: 3');
+  if(f0b._input) f0b._input.min='0.5'; if(f0b._input) f0b._input.step='0.5';
+  f0b.style.display=ausencia.cantHoras&&ausencia.cantHoras!=='8'?'':'none';
+  f0._input.addEventListener('change',()=>{f0b.style.display=f0._input.value==='horas'?'':'none'});
+  const f1=makeFormField('Fecha','date',ausencia.fecha||todayStr);
+  const f2=makeFormField('Motivo','select',{selected:ausencia.motivo||'personal',options:[{value:'personal',label:'Personal'},{value:'enfermedad',label:'Enfermedad'},{value:'familiar',label:'Familiar'},{value:'tramite',label:'Tramite'},{value:'vacaciones',label:'Vacaciones'},{value:'otro',label:'Otro'}]});
+  const justBase=(ausencia.justificacion||'').replace(/\s*\(\d+h\)$/,'').replace(/\s*\(\d+ dias:.*\)$/,'');
+  const f3=makeFormField('Justificacion / Detalle','textarea',justBase,'Explica brevemente el motivo...');
+  const btns=el('div',{style:{display:'flex',gap:'10px',justifyContent:'flex-end'}},
+    el('button',{className:'btn btn-secondary',onClick:()=>{state.modals={};render()}},'Cancelar'),
+    el('button',{className:'btn btn-primary',onClick:async()=>{
+      const tipoAus=f0._input.value,fecha=f1._input.value,motivo=f2._input.value,justificacion=f3._input.value;
+      if(!fecha) return;
+      const cantHoras=tipoAus==='horas'?(String(Number(f0b._input.value)||2)):'8';
+      const justFinal=tipoAus==='horas'?justificacion+' ('+cantHoras+'h)':justificacion;
+      ausencia.fecha=fecha; ausencia.motivo=motivo; ausencia.cantHoras=cantHoras; ausencia.justificacion=justFinal;
+      await apiPost({action:'update',sheet:'Ausencias',id:ausencia.id,data:{fecha,motivo,cantHoras,justificacion:justFinal}});
+      state.modals={};render();
+    }},'Guardar Cambios')
+  );
+  makeModal('Editar Ausencia',[
+    el('div',{style:{background:'#FFFBEB',border:'1px solid #FDE68A',borderRadius:'10px',padding:'12px',marginBottom:'16px',fontSize:'12px',color:'#92400E',lineHeight:'1.6'}},
+      'Solo podes editar ausencias en estado Pendiente.'
+    ),
+    f0,f0b,f1,f2,f3,btns
+  ],app);
+}
+
 function renderAusencias(c) {
   const aus = state.data.ausencias||[];
   const mine = aus.filter(a=>a.nombre===state.accessName);
@@ -2847,7 +2882,7 @@ function renderAusencias(c) {
   }
 
   const table = el('table',{className:'table'});
-  const headers = showAll ? ['Fecha','Persona','Horas','Motivo','Justificacion','Estado','Acciones'] : ['Fecha','Horas','Motivo','Justificacion','Estado'];
+  const headers = showAll ? ['Fecha','Persona','Horas','Motivo','Justificacion','Estado','Acciones'] : ['Fecha','Horas','Motivo','Justificacion','Estado','Acciones'];
   table.append(el('thead',{},el('tr',{},...headers.map(h=>el('th',{},h)))));
   const tbody = el('tbody');
 
@@ -2886,6 +2921,20 @@ function renderAusencias(c) {
         state.data.ausencias=state.data.ausencias.filter(x=>x.id!==a.id);
         apiPost({action:'delete',sheet:'Ausencias',id:a.id});render();
       },innerHTML:'\ud83d\uddd1'}));
+      cells.push(el('td',{},actDiv));
+    } else {
+      const actDiv = el('div',{style:{display:'flex',gap:'6px'}});
+      if(isPend) {
+        actDiv.append(
+          el('button',{className:'btn btn-secondary',style:{padding:'4px 10px',fontSize:'11px'},onClick:()=>{
+            state.modals.editAusencia=a;render();
+          }},'\u270f Editar'),
+          el('button',{className:'trash-btn',onClick:()=>{
+            state.data.ausencias=state.data.ausencias.filter(x=>x.id!==a.id);
+            apiPost({action:'delete',sheet:'Ausencias',id:a.id});render();
+          },innerHTML:'\ud83d\uddd1'})
+        );
+      }
       cells.push(el('td',{},actDiv));
     }
 
